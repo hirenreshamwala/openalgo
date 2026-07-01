@@ -69,6 +69,8 @@ class User(Base):
     # change matters only on Postgres/MySQL.
     totp_secret = Column(String(255), nullable=False)  # Fernet-encrypted at rest
     is_admin = Column(Boolean, default=False)
+    role = Column(String(20), nullable=False, default="user")
+    status = Column(String(20), nullable=False, default="pending")
 
     # ----- 2FA (TOTP) controls -----
     # ``totp_enabled`` is the master switch. When False, every per-purpose
@@ -185,6 +187,8 @@ def add_user(username, email, password, is_admin=False):
             email=email,
             totp_secret=encrypt_token(totp_secret),
             is_admin=is_admin,
+            role="admin" if is_admin else "user",
+            status="approved" if is_admin else "pending",
         )
         user.set_password(password)
         db_session.add(user)
@@ -229,6 +233,44 @@ def find_user_by_exact_username(username):
     if not username:
         return None
     return User.query.filter_by(username=username).first()
+
+
+def approve_user(username: str) -> bool:
+    """Set user status to approved. Returns True on success."""
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return False
+    user.status = "approved"
+    try:
+        db_session.commit()
+        return True
+    except Exception:
+        db_session.rollback()
+        return False
+
+
+def reject_user(username: str) -> bool:
+    """Set user status to rejected. Returns True on success."""
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return False
+    user.status = "rejected"
+    try:
+        db_session.commit()
+        return True
+    except Exception:
+        db_session.rollback()
+        return False
+
+
+def get_all_users() -> list:
+    """Return all non-admin users. Used by admin dashboard."""
+    return User.query.filter_by(role="user").all()
+
+
+def get_pending_users() -> list:
+    """Return all users awaiting approval."""
+    return User.query.filter_by(status="pending").all()
 
 
 def rehash_all_passwords():
