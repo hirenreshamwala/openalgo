@@ -245,6 +245,7 @@ def approve_user(username: str) -> bool:
         db_session.commit()
         return True
     except Exception:
+        logger.exception("Failed to approve user %s", username)
         db_session.rollback()
         return False
 
@@ -259,6 +260,7 @@ def reject_user(username: str) -> bool:
         db_session.commit()
         return True
     except Exception:
+        logger.exception("Failed to reject user %s", username)
         db_session.rollback()
         return False
 
