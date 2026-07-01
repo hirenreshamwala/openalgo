@@ -25,6 +25,12 @@ from database.qty_freeze_db import (
     load_freeze_qty_from_csv,
 )
 from database.qty_freeze_db import db_session as freeze_db_session
+from database.user_db import (
+    approve_user,
+    get_all_users,
+    get_pending_users,
+    reject_user,
+)
 from limiter import limiter
 from utils.logging import get_logger
 from utils.session import check_session_validity
@@ -2395,3 +2401,50 @@ def api_mcp_settings_put():
             "settings_pending": _mcp_settings_payload(),  # what's in .env now
         }
     )
+
+
+# ============================================================================
+# User Management Endpoints (Multi-Tenant Only)
+# ============================================================================
+
+
+@admin_bp.route("/users", methods=["GET"])
+@check_session_validity
+@limiter.limit(API_RATE_LIMIT)
+def list_users():
+    """List all users. Admin only. Multi-tenant only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    users = get_all_users()
+    return jsonify(
+        users=[
+            {"username": u.username, "email": u.email, "status": u.status, "role": u.role}
+            for u in users
+        ]
+    )
+
+
+@admin_bp.route("/users/<username>/approve", methods=["POST"])
+@check_session_validity
+@limiter.limit(API_RATE_LIMIT)
+def approve_user_route(username):
+    """Approve a pending user. Admin only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    if not approve_user(username):
+        return jsonify(status="error", message="User not found"), 404
+    logger.info(f"Admin approved user: {username}")
+    return jsonify(status="success", message=f"User {username} approved")
+
+
+@admin_bp.route("/users/<username>/reject", methods=["POST"])
+@check_session_validity
+@limiter.limit(API_RATE_LIMIT)
+def reject_user_route(username):
+    """Reject a user. Admin only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    if not reject_user(username):
+        return jsonify(status="error", message="User not found"), 404
+    logger.info(f"Admin rejected user: {username}")
+    return jsonify(status="success", message=f"User {username} rejected")
