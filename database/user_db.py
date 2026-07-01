@@ -275,6 +275,24 @@ def get_pending_users() -> list:
     return User.query.filter_by(status="pending").all()
 
 
+def check_mt_login_allowed(username: str) -> tuple:
+    """Return (True, '') if login is allowed, or (False, message) if blocked.
+
+    Checks the user's approval status. Only meaningful when MULTI_TENANT=true;
+    callers should guard on that env var before calling this function.
+    Returns (True, '') when the user is not found (let the caller handle that).
+    """
+    user = find_user_by_exact_username(username)
+    if user is None or user.status == "approved":
+        return True, ""
+
+    status_msg = {
+        "pending": "Your account is pending admin approval.",
+        "rejected": "Your account has been rejected.",
+    }.get(user.status, "Your account is not active.")
+    return False, status_msg
+
+
 def rehash_all_passwords():
     """
     Utility function to rehash all existing passwords with Argon2.

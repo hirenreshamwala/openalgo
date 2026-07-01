@@ -19,11 +19,17 @@ from database.auth_db import auth_cache, feed_token_cache, upsert_auth
 from database.settings_db import get_smtp_settings, set_smtp_settings
 from database.user_db import (  # Import the function
     User,
+    add_user,
+    approve_user,
     authenticate_user,
+    check_mt_login_allowed,
     db_session,
     find_user_by_email,
     find_user_by_exact_username,
     find_user_by_username,
+    get_all_users,
+    get_pending_users,
+    reject_user,
 )
 from extensions import socketio
 from limiter import limiter  # Import the limiter instance
@@ -74,6 +80,45 @@ def _pending_totp_is_fresh() -> bool:
 def _clear_pending_totp() -> None:
     session.pop("pending_totp_user", None)
     session.pop("pending_totp_started_at", None)
+
+
+def _check_mt_login_allowed(username: str) -> tuple:
+    """Return (True, '') if login is allowed, or (False, message) if blocked.
+
+    Only active when MULTI_TENANT=true. In single-tenant mode always returns
+    (True, '') so the upstream login flow is completely unaffected.
+    """
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return True, ""
+    return check_mt_login_allowed(username)
+
+
+@auth_bp.route("/register", methods=["POST"])
+def register():
+    """Self-service registration. Only active when MULTI_TENANT=true."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Registration not available"), 404
+
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    email = (data.get("email") or "").strip()
+    password = data.get("password") or ""
+
+    if not username or not email or not password:
+        return jsonify(status="error", message="username, email, and password are required"), 400
+
+    from utils.auth_utils import validate_password_strength
+
+    is_valid, error_message = validate_password_strength(password)
+    if not is_valid:
+        return jsonify(status="error", message=error_message), 400
+
+    user = add_user(username, email, password, is_admin=False)
+    if user is None:
+        return jsonify(status="error", message="Username or email already exists"), 409
+
+    logger.info(f"New user {username} registered, status=pending")
+    return jsonify(status="success", message="Registration successful. Awaiting admin approval.")
 
 
 @auth_bp.errorhandler(429)
@@ -294,6 +339,11 @@ def login():
 
         if authenticate_user(username, password):
             logger.info(f"[LOGIN] Password auth success for: {username}")
+
+            # Multi-tenant gate: block pending/rejected users before any session work
+            _mt_allowed, _mt_msg = _check_mt_login_allowed(username)
+            if not _mt_allowed:
+                return jsonify(status="error", message=_mt_msg), 403
 
             # If the user has 2FA enabled for login, defer setting session["user"]
             # until TOTP is verified. This is the gate that prevents an attacker
