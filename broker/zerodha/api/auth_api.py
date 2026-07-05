@@ -2,14 +2,15 @@ import hashlib
 import json
 import os
 
+from utils.broker_context import get_broker_credential
 from utils.httpx_client import get_httpx_client
 
 
 def authenticate_broker(request_token):
     try:
         # Fetching the necessary credentials from environment variables
-        BROKER_API_KEY = os.getenv("BROKER_API_KEY")
-        BROKER_API_SECRET = os.getenv("BROKER_API_SECRET")
+        BROKER_API_KEY = get_broker_credential("BROKER_API_KEY")
+        BROKER_API_SECRET = get_broker_credential("BROKER_API_SECRET")
 
         # Zerodha's endpoint for session token exchange
         url = "https://api.kite.trade/session/token"

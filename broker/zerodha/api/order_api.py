@@ -5,6 +5,7 @@ import threading
 import time
 import urllib.parse
 
+from utils.broker_context import get_broker_credential
 from broker.zerodha.mapping.transform_data import (
     map_product_type,
     reverse_map_product_type,
@@ -162,7 +163,7 @@ def get_open_position(tradingsymbol, exchange, product, auth):
 def place_order_api(data, auth):
     AUTH_TOKEN = auth
 
-    BROKER_API_KEY = os.getenv("BROKER_API_KEY")
+    BROKER_API_KEY = get_broker_credential("BROKER_API_KEY")
     data["apikey"] = BROKER_API_KEY
     # token = get_token(data['symbol'], data['exchange'])
     newdata = transform_data(data)
