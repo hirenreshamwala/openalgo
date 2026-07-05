@@ -13,6 +13,7 @@ from database.user_db import Base as UserBase
 from database.auth_db import Base as AuthBase
 from database.symbol import Base as SymbolBase
 from database.broker_creds_db import Base as BrokerCredsBase
+from database.symbols_db import Base as SymbolsBase
 
 config = context.config
 
@@ -25,7 +26,7 @@ if config.config_file_name is not None:
 # Combine all metadata
 from sqlalchemy import MetaData
 target_metadata = MetaData()
-for base in [UserBase, AuthBase, SymbolBase, BrokerCredsBase]:
+for base in [UserBase, AuthBase, SymbolBase, BrokerCredsBase, SymbolsBase]:
     for table in base.metadata.tables.values():
         table.tometadata(target_metadata)
 
