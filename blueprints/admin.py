@@ -2448,3 +2448,93 @@ def reject_user_route(username):
         return jsonify(status="error", message="User not found"), 404
     logger.info(f"Admin rejected user: {username}")
     return jsonify(status="success", message=f"User {username} rejected")
+
+
+# ============================================================================
+# Aggregate endpoints — fan-out to all approved users (MULTI_TENANT only)
+# ============================================================================
+
+import concurrent.futures
+
+
+def _get_approved_users_auth() -> list[tuple[str, str, str]]:
+    """Return (username, auth_token, broker) for all approved users with an active auth record."""
+    from database.auth_db import Auth, get_auth_token
+
+    users = get_all_users()
+    result = []
+    for user in users:
+        if user.status != "approved":
+            continue
+        auth_row = Auth.query.filter_by(name=user.username).filter_by(is_revoked=False).first()
+        if auth_row is None:
+            continue
+        token = get_auth_token(user.username)
+        if token:
+            result.append((user.username, token, auth_row.broker))
+    return result
+
+
+def _fetch_user_data(fetch_fn, users_auth: list[tuple[str, str, str]]) -> list[dict]:
+    """Fan out fetch_fn(auth_token, broker) to all users concurrently.
+
+    users_auth: list of (username, auth_token, broker)
+    Returns list of {"username": ..., "data": ...} dicts.
+    """
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {
+            pool.submit(fetch_fn, auth_token, broker): username
+            for username, auth_token, broker in users_auth
+        }
+        for future in concurrent.futures.as_completed(futures, timeout=15):
+            username = futures[future]
+            try:
+                data = future.result()
+                results.append({"username": username, "data": data})
+            except Exception as e:
+                logger.exception(f"Error fetching data for user {username}: {e}")
+                results.append({"username": username, "data": None, "error": str(e)})
+    return results
+
+
+@admin_bp.route("/aggregate/orders", methods=["GET"])
+@check_session_validity
+@limiter.limit(API_RATE_LIMIT)
+def aggregate_orders():
+    """Aggregate orders across all approved users. Admin only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    from services.orderbook_service import get_orderbook_with_auth
+
+    users_auth = _get_approved_users_auth()
+    data = _fetch_user_data(get_orderbook_with_auth, users_auth)
+    return jsonify(data=data)
+
+
+@admin_bp.route("/aggregate/positions", methods=["GET"])
+@check_session_validity
+@limiter.limit(API_RATE_LIMIT)
+def aggregate_positions():
+    """Aggregate positions across all approved users. Admin only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    from services.positionbook_service import get_positionbook_with_auth
+
+    users_auth = _get_approved_users_auth()
+    data = _fetch_user_data(get_positionbook_with_auth, users_auth)
+    return jsonify(data=data)
+
+
+@admin_bp.route("/aggregate/funds", methods=["GET"])
+@check_session_validity
+@limiter.limit(API_RATE_LIMIT)
+def aggregate_funds():
+    """Aggregate funds across all approved users. Admin only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    from services.funds_service import get_funds_with_auth
+
+    users_auth = _get_approved_users_auth()
+    data = _fetch_user_data(get_funds_with_auth, users_auth)
+    return jsonify(data=data)
