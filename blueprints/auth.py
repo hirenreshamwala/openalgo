@@ -50,6 +50,30 @@ RESET_RATE_LIMIT = os.getenv("RESET_RATE_LIMIT", "15 per hour")  # Password rese
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 
+@auth_bp.app_before_request
+def _load_broker_credentials_into_context():
+    """In multi-tenant mode, load the logged-in user's broker credentials into context."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return
+    username = session.get("user")
+    broker = os.getenv("BROKER_NAME", "")
+    if not username or not broker:
+        return
+    try:
+        from database.broker_creds_db import get_broker_credentials
+        from utils.broker_context import set_broker_credentials
+        creds = get_broker_credentials(username, broker)
+        if creds:
+            # Map stored keys to the env-var names the broker modules expect
+            set_broker_credentials({
+                "BROKER_API_KEY": creds["api_key"],
+                "BROKER_API_SECRET": creds["api_secret"],
+                **(creds.get("extras") or {}),
+            })
+    except Exception:
+        pass  # Never block a request due to credential loading failure
+
+
 def _utcnow_iso() -> str:
     """ISO timestamp used for TOTP freshness markers in the session."""
     from datetime import datetime
