@@ -1198,3 +1198,29 @@ def get_distinct_underlyings_cached(
     except Exception as e:
         logger.exception(f"Error getting underlyings: {e}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Multi-tenant broker-aware lookup helpers (MULTI_TENANT=true only)
+# ---------------------------------------------------------------------------
+
+
+def get_token_mt(symbol: str, exchange: str, broker: str) -> str | None:
+    """Broker-aware token lookup for multi-tenant mode."""
+    from database.symbols_db import get_token_for_broker
+
+    return get_token_for_broker(symbol, exchange, broker)
+
+
+def get_br_symbol_mt(symbol: str, exchange: str, broker: str) -> str | None:
+    """Broker-aware brsymbol lookup for multi-tenant mode."""
+    from database.symbols_db import get_brsymbol_for_broker
+
+    return get_brsymbol_for_broker(symbol, exchange, broker)
+
+
+def get_oa_symbol_mt(brsymbol: str, brexchange: str, broker: str) -> str | None:
+    """Broker-aware reverse lookup for multi-tenant mode."""
+    from database.symbols_db import get_oa_symbol_for_broker
+
+    return get_oa_symbol_for_broker(brsymbol, brexchange, broker)
