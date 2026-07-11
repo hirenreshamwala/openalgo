@@ -2408,6 +2408,51 @@ def api_mcp_settings_put():
 # ============================================================================
 
 
+@admin_bp.route("/users/manage", methods=["GET"])
+@check_session_validity
+def user_management_page():
+    """Simple HTML admin UI for user management (multi-tenant only)."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return "Not available", 404
+    users = get_all_users()
+    rows = ""
+    for u in users:
+        badge = {
+            "approved": "<span style='color:#16a34a;font-weight:600'>approved</span>",
+            "pending":  "<span style='color:#d97706;font-weight:600'>pending</span>",
+            "rejected": "<span style='color:#dc2626;font-weight:600'>rejected</span>",
+        }.get(u.status, u.status)
+        actions = ""
+        if u.status == "pending":
+            actions += (
+                f"<form method='post' action='/admin/users/{u.username}/approve' style='display:inline'>"
+                "<button type='submit' style='background:#16a34a;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;margin-right:4px'>Approve</button></form>"
+                f"<form method='post' action='/admin/users/{u.username}/reject' style='display:inline'>"
+                "<button type='submit' style='background:#dc2626;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer'>Reject</button></form>"
+            )
+        rows += (
+            f"<tr><td style='padding:8px 16px'>{u.username}</td>"
+            f"<td style='padding:8px 16px'>{u.email}</td>"
+            f"<td style='padding:8px 16px'>{u.role}</td>"
+            f"<td style='padding:8px 16px'>{badge}</td>"
+            f"<td style='padding:8px 16px'>{actions}</td></tr>"
+        )
+    html = f"""<!doctype html><html><head><meta charset='utf-8'>
+<title>User Management — OpenAlgo Admin</title>
+<style>body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:32px}}
+h1{{color:#f8fafc;margin-bottom:4px}}p{{color:#94a3b8;margin-top:0}}
+table{{border-collapse:collapse;width:100%;background:#1e293b;border-radius:8px;overflow:hidden}}
+th{{background:#334155;padding:10px 16px;text-align:left;font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}}
+tr:nth-child(even){{background:#243044}}
+a{{color:#38bdf8;text-decoration:none}}a:hover{{text-decoration:underline}}</style></head>
+<body><h1>User Management</h1><p>Multi-tenant admin panel &mdash; <a href='/dashboard'>Back to dashboard</a></p>
+<table><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>{rows}</tbody></table>
+<p style='margin-top:24px;color:#475569;font-size:13px'>Pending users cannot log in until approved.</p>
+</body></html>"""
+    return html
+
+
 @admin_bp.route("/users", methods=["GET"])
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
@@ -2434,6 +2479,8 @@ def approve_user_route(username):
     if not approve_user(username):
         return jsonify(status="error", message="User not found"), 404
     logger.info(f"Admin approved user: {username}")
+    if request.accept_mimetypes.accept_html:
+        return redirect(url_for("admin_bp.user_management_page"))
     return jsonify(status="success", message=f"User {username} approved")
 
 
@@ -2447,6 +2494,8 @@ def reject_user_route(username):
     if not reject_user(username):
         return jsonify(status="error", message="User not found"), 404
     logger.info(f"Admin rejected user: {username}")
+    if request.accept_mimetypes.accept_html:
+        return redirect(url_for("admin_bp.user_management_page"))
     return jsonify(status="success", message=f"User {username} rejected")
 
 
