@@ -7,8 +7,10 @@ The instance-wide .env broker config is not used in multi-tenant mode.
 """
 
 import os
+import time
 from urllib.parse import quote, unquote, urlsplit
 
+import httpx
 from flask import Blueprint, jsonify, redirect, request, session, url_for
 
 from database.broker_creds_db import (
@@ -19,6 +21,36 @@ from database.broker_creds_db import (
 )
 from utils.logging import get_logger
 from utils.session import require_user_session
+
+
+# Cache the server's public egress IP — it is stable, so avoid an external call
+# on every page render. Refreshed hourly.
+_ip_cache = {"ip": None, "ts": 0.0}
+_IP_TTL = 3600.0
+
+
+def _get_server_public_ip() -> str | None:
+    """Return the server's public outbound IP (what a broker sees on a direct
+    connection), or None if it can't be determined. Cached for 1 hour.
+
+    A direct httpx call is used deliberately (not the context-aware pooled
+    client) so the answer is the SERVER's IP, never a user's proxy IP.
+    """
+    now = time.time()
+    if _ip_cache["ip"] and now - _ip_cache["ts"] < _IP_TTL:
+        return _ip_cache["ip"]
+    for url in ("https://api.ipify.org", "https://checkip.amazonaws.com", "https://ifconfig.me/ip"):
+        try:
+            resp = httpx.get(url, timeout=5.0)
+            if resp.status_code == 200:
+                ip = resp.text.strip()
+                if ip:
+                    _ip_cache["ip"] = ip
+                    _ip_cache["ts"] = now
+                    return ip
+        except Exception:
+            continue
+    return None
 
 
 def _build_proxy_url(scheme: str, host: str, port: str, user: str, password: str) -> str:
@@ -153,6 +185,26 @@ def broker_credentials_page():
     else:
         saved_table = "<p class='muted'>No brokers configured yet. Add one below.</p>"
 
+    # Server's public egress IP — what the broker sees on a direct (no-proxy)
+    # connection. Users whitelisting the shared server IP add this.
+    server_ip = _get_server_public_ip()
+    if server_ip:
+        ip_banner = (
+            "<div class='ipbox'><div>"
+            "<span class='muted'>This server's public IP (for direct connections)</span><br>"
+            f"<span class='ip'>{server_ip}</span></div>"
+            f"<button type='button' class='btn-copy' onclick=\"navigator.clipboard.writeText('{server_ip}')\">Copy</button>"
+            "</div>"
+            "<p class='muted'>Add this IP to your broker's API/static-IP whitelist if you are "
+            "<strong>not</strong> using an egress proxy below. If you use a proxy, whitelist the "
+            "proxy's IP instead.</p>"
+        )
+    else:
+        ip_banner = (
+            "<div class='ipbox'><span class='muted'>Could not determine the server's public IP "
+            "(no outbound internet?). Check your server's static IP manually.</span></div>"
+        )
+
     html = f"""<!doctype html><html><head><meta charset='utf-8'>
 <title>Broker Credentials — OpenAlgo</title>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -167,11 +219,14 @@ label{{display:block;font-size:13px;color:#94a3b8;margin:12px 0 4px}}
 input,select{{width:100%;padding:9px 12px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px}}
 button{{border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;margin-top:16px}}
 .btn-save{{background:#2563eb;color:#fff}}.btn-del{{background:#7f1d1d;color:#fecaca;padding:5px 12px;margin:0;font-size:13px}}
+.ipbox{{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#0b2545;border:1px solid #1d4ed8;border-radius:8px;padding:14px 18px;margin-top:16px}}
+.ipbox .ip{{font-family:ui-monospace,monospace;font-size:1.3rem;font-weight:700;color:#7dd3fc;letter-spacing:.02em}}
+.btn-copy{{background:#1d4ed8;color:#fff;padding:6px 14px;margin:0;font-size:13px}}
 </style></head><body>
 <nav><a href='/broker'>&#8592; Broker Login</a><a href='/mt/broker-credentials'>&#8635; Refresh</a></nav>
 <h1>Broker Credentials</h1>
 <p class='muted'>Signed in as <strong>{username}</strong>. Add the API key &amp; secret for each broker you want to trade with. Stored encrypted, per user.</p>
-
+{ip_banner}
 <h2>Configured brokers</h2>
 {saved_table}
 
