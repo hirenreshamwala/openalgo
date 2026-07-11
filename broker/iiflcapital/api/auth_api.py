@@ -3,6 +3,7 @@ import os
 from urllib.parse import quote_plus
 
 from broker.iiflcapital.baseurl import BASE_URL, LOGIN_URL
+from utils.broker_context import get_broker_credential
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
 
@@ -16,8 +17,8 @@ def _generate_checksum(client_id: str, auth_code: str, app_secret: str) -> str:
 
 def get_login_url() -> str:
     """Generate IIFL Capital login URL from environment variables."""
-    app_key = os.getenv("BROKER_API_KEY", "").strip()
-    redirect_url = os.getenv("REDIRECT_URL", "").strip()
+    app_key = (get_broker_credential("BROKER_API_KEY") or "").strip()
+    redirect_url = (get_broker_credential("REDIRECT_URL") or "").strip()
 
     if not app_key or not redirect_url:
         return ""

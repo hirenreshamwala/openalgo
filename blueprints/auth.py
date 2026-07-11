@@ -70,11 +70,14 @@ def _load_broker_credentials_into_context():
         auth_row = Auth.query.filter_by(name=username).first()
         if not auth_row or not auth_row.broker:
             return
-        creds = get_broker_credentials(username, auth_row.broker)
+        broker = auth_row.broker
+        app_url = os.getenv("HOST_SERVER", "http://127.0.0.1:5000").rstrip("/")
+        creds = get_broker_credentials(username, broker)
         if creds:
             set_broker_credentials({
                 "BROKER_API_KEY": creds["api_key"],
                 "BROKER_API_SECRET": creds["api_secret"],
+                "REDIRECT_URL": f"{app_url}/{broker}/callback",
                 **(creds.get("extras") or {}),
             })
     except Exception:
