@@ -1265,40 +1265,42 @@ def load_and_check_env_variables() -> None:
             print("Example: http://127.0.0.1:5000/zerodha/callback")
             sys.exit(1)
 
-    # Validate broker name
-    valid_brokers_str = os.getenv("VALID_BROKERS", "")
-    if not valid_brokers_str:
-        print("\nError: VALID_BROKERS not configured in .env file.")
-        print("\nSolution: Check the .sample.env file for the latest configuration")
-        print("The application cannot start without valid broker configuration.")
-        sys.exit(1)
+    # Validate broker name — skipped in multi-tenant mode because REDIRECT_URL
+    # is built dynamically per request and the .env value is a placeholder.
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        valid_brokers_str = os.getenv("VALID_BROKERS", "")
+        if not valid_brokers_str:
+            print("\nError: VALID_BROKERS not configured in .env file.")
+            print("\nSolution: Check the .sample.env file for the latest configuration")
+            print("The application cannot start without valid broker configuration.")
+            sys.exit(1)
 
-    valid_brokers = set(broker.strip().lower() for broker in valid_brokers_str.split(","))
+        valid_brokers = set(broker.strip().lower() for broker in valid_brokers_str.split(","))
 
-    try:
-        import re
+        try:
+            import re
 
-        match = re.search(r"/([^/]+)/callback$", redirect_url)
-        if not match:
-            print("\nError: Invalid REDIRECT_URL format.")
-            print("The URL must end with '/broker_name/callback'")
+            match = re.search(r"/([^/]+)/callback$", redirect_url)
+            if not match:
+                print("\nError: Invalid REDIRECT_URL format.")
+                print("The URL must end with '/broker_name/callback'")
+                print("Example: http://127.0.0.1:5000/zerodha/callback")
+                sys.exit(1)
+
+            broker_name = match.group(1).lower()
+            if broker_name not in valid_brokers:
+                print("\nError: Invalid broker name in REDIRECT_URL.")
+                print(f"Broker '{broker_name}' is not in the list of valid brokers.")
+                print(f"\nValid brokers are: {', '.join(sorted(valid_brokers))}")
+                print("\nPlease update your REDIRECT_URL with a valid broker name.")
+                sys.exit(1)
+
+        except Exception as e:
+            print("\nError: Could not validate REDIRECT_URL format.")
+            print(f"Details: {str(e)}")
+            print("\nThe URL must follow the format: http://domain/broker_name/callback")
             print("Example: http://127.0.0.1:5000/zerodha/callback")
             sys.exit(1)
-
-        broker_name = match.group(1).lower()
-        if broker_name not in valid_brokers:
-            print("\nError: Invalid broker name in REDIRECT_URL.")
-            print(f"Broker '{broker_name}' is not in the list of valid brokers.")
-            print(f"\nValid brokers are: {', '.join(sorted(valid_brokers))}")
-            print("\nPlease update your REDIRECT_URL with a valid broker name.")
-            sys.exit(1)
-
-    except Exception as e:
-        print("\nError: Could not validate REDIRECT_URL format.")
-        print(f"Details: {str(e)}")
-        print("\nThe URL must follow the format: http://domain/broker_name/callback")
-        print("Example: http://127.0.0.1:5000/zerodha/callback")
-        sys.exit(1)
 
     # Validate rate limits format
     rate_limit_vars = [

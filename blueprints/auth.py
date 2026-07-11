@@ -50,7 +50,7 @@ RESET_RATE_LIMIT = os.getenv("RESET_RATE_LIMIT", "15 per hour")  # Password rese
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 
-@auth_bp.app_before_request
+@auth_bp.before_app_request
 def _load_broker_credentials_into_context():
     """In multi-tenant mode, load the logged-in user's broker credentials into context.
 
