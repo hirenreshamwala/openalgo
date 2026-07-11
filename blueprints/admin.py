@@ -2408,7 +2408,7 @@ def api_mcp_settings_put():
 # ============================================================================
 
 
-@admin_bp.route("/users/manage", methods=["GET"])
+@admin_bp.route("/mt/users", methods=["GET"])
 @check_session_validity
 def user_management_page():
     """Simple HTML admin UI for user management (multi-tenant only)."""
