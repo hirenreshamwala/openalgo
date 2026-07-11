@@ -248,6 +248,32 @@ def check_session_validity(f):
     return decorated_function
 
 
+def require_user_session(f):
+    """Lighter session guard: only requires password login (session['user'] set).
+
+    Used for admin-only pages that must be accessible before broker OAuth
+    completes (e.g. multi-tenant user management).  Full broker session
+    (session['logged_in']) is NOT required.
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        from flask import jsonify, request
+
+        if not session.get("user"):
+            is_ajax = (
+                request.headers.get("X-Requested-With") == "XMLHttpRequest"
+                or request.headers.get("Accept", "").startswith("application/json")
+                or request.is_json
+            )
+            if is_ajax:
+                return jsonify({"status": "error", "message": "Not authenticated"}), 401
+            return redirect(url_for("auth.login"))
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
 def invalidate_session_if_invalid(f):
     """Decorator to invalidate session if invalid without redirecting"""
 

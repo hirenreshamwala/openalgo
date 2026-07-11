@@ -33,7 +33,7 @@ from database.user_db import (
 )
 from limiter import limiter
 from utils.logging import get_logger
-from utils.session import check_session_validity
+from utils.session import check_session_validity, require_user_session
 
 logger = get_logger(__name__)
 
@@ -2409,11 +2409,16 @@ def api_mcp_settings_put():
 
 
 @admin_bp.route("/mt/users", methods=["GET"])
-@check_session_validity
+@require_user_session
 def user_management_page():
     """Simple HTML admin UI for user management (multi-tenant only)."""
     if os.getenv("MULTI_TENANT", "false").lower() != "true":
         return "Not available", 404
+    from flask import session as flask_session
+    from database.user_db import find_user_by_exact_username
+    current_user = find_user_by_exact_username(flask_session.get("user", ""))
+    if not current_user or current_user.role != "admin":
+        return "Forbidden: admin only", 403
     users = get_all_users()
     rows = ""
     for u in users:
@@ -2430,6 +2435,11 @@ def user_management_page():
                 f"<form method='post' action='/admin/users/{u.username}/reject' style='display:inline'>"
                 "<button type='submit' style='background:#dc2626;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer'>Reject</button></form>"
             )
+        elif u.status == "approved" and u.role != "admin":
+            actions += (
+                f"<form method='post' action='/admin/users/{u.username}/reject' style='display:inline'>"
+                "<button type='submit' style='background:#64748b;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer'>Revoke</button></form>"
+            )
         rows += (
             f"<tr><td style='padding:8px 16px'>{u.username}</td>"
             f"<td style='padding:8px 16px'>{u.email}</td>"
@@ -2439,22 +2449,30 @@ def user_management_page():
         )
     html = f"""<!doctype html><html><head><meta charset='utf-8'>
 <title>User Management — OpenAlgo Admin</title>
-<style>body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:32px}}
-h1{{color:#f8fafc;margin-bottom:4px}}p{{color:#94a3b8;margin-top:0}}
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<style>*{{box-sizing:border-box}}body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:32px}}
+h1{{color:#f8fafc;margin-bottom:4px;font-size:1.5rem}}p{{color:#94a3b8;margin-top:0}}
+nav{{margin-bottom:24px}}nav a{{color:#38bdf8;text-decoration:none;margin-right:16px;font-size:14px}}
 table{{border-collapse:collapse;width:100%;background:#1e293b;border-radius:8px;overflow:hidden}}
-th{{background:#334155;padding:10px 16px;text-align:left;font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}}
-tr:nth-child(even){{background:#243044}}
-a{{color:#38bdf8;text-decoration:none}}a:hover{{text-decoration:underline}}</style></head>
-<body><h1>User Management</h1><p>Multi-tenant admin panel &mdash; <a href='/dashboard'>Back to dashboard</a></p>
+th{{background:#334155;padding:10px 16px;text-align:left;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}}
+td{{padding:8px 16px;font-size:14px;border-top:1px solid #1e293b}}
+tr:hover td{{background:#243044}}
+button{{border:none;padding:5px 14px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:500}}
+.chip{{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}}
+</style></head>
+<body>
+<nav><a href='/admin/mt/users'>&#8635; Refresh</a><a href='/broker'>Broker</a></nav>
+<h1>User Management</h1>
+<p>Logged in as <strong>{flask_session.get("user")}</strong> (admin) &mdash; Multi-tenant mode</p>
 <table><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
 <tbody>{rows}</tbody></table>
-<p style='margin-top:24px;color:#475569;font-size:13px'>Pending users cannot log in until approved.</p>
+<p style='margin-top:16px;color:#475569;font-size:12px'>Pending users cannot log in until approved. Users register at /auth/register</p>
 </body></html>"""
     return html
 
 
 @admin_bp.route("/users", methods=["GET"])
-@check_session_validity
+@require_user_session
 @limiter.limit(API_RATE_LIMIT)
 def list_users():
     """List all users. Admin only. Multi-tenant only."""
@@ -2470,7 +2488,7 @@ def list_users():
 
 
 @admin_bp.route("/users/<username>/approve", methods=["POST"])
-@check_session_validity
+@require_user_session
 @limiter.limit(API_RATE_LIMIT)
 def approve_user_route(username):
     """Approve a pending user. Admin only."""
@@ -2485,7 +2503,7 @@ def approve_user_route(username):
 
 
 @admin_bp.route("/users/<username>/reject", methods=["POST"])
-@check_session_validity
+@require_user_session
 @limiter.limit(API_RATE_LIMIT)
 def reject_user_route(username):
     """Reject a user. Admin only."""

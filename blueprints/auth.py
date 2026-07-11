@@ -406,10 +406,15 @@ def login():
                                   login_type="resume", broker=session.get("broker"))
                 return resumed
 
-            # No valid broker session — redirect to broker login
+            # No valid broker session — redirect to broker login (or admin page for admins)
             logger.info("[LOGIN] No valid broker session, redirecting to /broker")
             from database.auth_db import log_login_attempt
             log_login_attempt(username, ip, ua, status="success", login_type="password")
+            if os.getenv("MULTI_TENANT", "false").lower() == "true":
+                from database.user_db import find_user_by_exact_username
+                u = find_user_by_exact_username(username)
+                if u and u.role == "admin":
+                    return jsonify({"status": "success", "redirect": "/admin/mt/users"}), 200
             return jsonify({"status": "success"}), 200
         else:
             from database.auth_db import log_login_attempt
@@ -508,6 +513,11 @@ def login_totp():
         return resumed
 
     log_login_attempt(pending_username, ip, ua, status="success", login_type="totp")
+    if os.getenv("MULTI_TENANT", "false").lower() == "true":
+        from database.user_db import find_user_by_exact_username
+        u = find_user_by_exact_username(pending_username)
+        if u and u.role == "admin":
+            return jsonify({"status": "success", "redirect": "/admin/mt/users"}), 200
     return jsonify({"status": "success"}), 200
 
 
