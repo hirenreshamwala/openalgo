@@ -52,19 +52,26 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 @auth_bp.app_before_request
 def _load_broker_credentials_into_context():
-    """In multi-tenant mode, load the logged-in user's broker credentials into context."""
+    """In multi-tenant mode, load the logged-in user's broker credentials into context.
+
+    The broker is read from the user's Auth row (each user may use a different
+    broker), not from a global env var.
+    """
     if os.getenv("MULTI_TENANT", "false").lower() != "true":
         return
     username = session.get("user")
-    broker = os.getenv("BROKER_NAME", "")
-    if not username or not broker:
+    if not username:
         return
     try:
+        from database.auth_db import Auth
         from database.broker_creds_db import get_broker_credentials
         from utils.broker_context import set_broker_credentials
-        creds = get_broker_credentials(username, broker)
+
+        auth_row = Auth.query.filter_by(name=username).first()
+        if not auth_row or not auth_row.broker:
+            return
+        creds = get_broker_credentials(username, auth_row.broker)
         if creds:
-            # Map stored keys to the env-var names the broker modules expect
             set_broker_credentials({
                 "BROKER_API_KEY": creds["api_key"],
                 "BROKER_API_SECRET": creds["api_secret"],
