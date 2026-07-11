@@ -139,8 +139,14 @@ export default function Login() {
         // Set login state (broker from response if session was resumed, empty otherwise)
         setLogin(username, data.broker || '')
         showToast.success('Login successful', 'system')
-        // Use redirect from response if provided, otherwise go to broker
-        navigate(data.redirect || '/broker')
+        // Server-rendered pages (e.g. the multi-tenant admin panel) are not React
+        // routes — they must be reached with a full page load, not client routing.
+        if (data.redirect && data.redirect.startsWith('/admin/')) {
+          window.location.href = data.redirect
+        } else {
+          // Use redirect from response if provided, otherwise go to broker
+          navigate(data.redirect || '/broker')
+        }
       }
     } catch (_err) {
       setError('Login failed. Please try again.')
@@ -191,7 +197,11 @@ export default function Login() {
 
       setLogin(username, data.broker || '')
       showToast.success('Login successful', 'system')
-      navigate(data.redirect || '/broker')
+      if (data.redirect && data.redirect.startsWith('/admin/')) {
+        window.location.href = data.redirect
+      } else {
+        navigate(data.redirect || '/broker')
+      }
     } catch (_err) {
       setError('Failed to verify TOTP. Please try again.')
     } finally {
