@@ -1019,6 +1019,16 @@ def get_session_status():
             {"status": "success", "message": "Not authenticated", "authenticated": False, "logged_in": False}
         ), 200
 
+    # Resolve the user's role (multi-tenant admin/user) so the SPA can render
+    # the admin area for admins even before a broker is connected.
+    user_role = "user"
+    try:
+        _u = find_user_by_exact_username(session.get("user"))
+        if _u is not None and getattr(_u, "role", None):
+            user_role = _u.role
+    except Exception:
+        pass
+
     # If session claims to be logged in with broker, validate the auth token exists
     if session.get("logged_in") and session.get("broker"):
         from database.auth_db import get_api_key_for_tradingview, get_auth_token
@@ -1047,6 +1057,7 @@ def get_session_status():
                     "user": session.get("user"),
                     "broker": session.get("broker"),
                     "broker_session_expired": True,
+                    "role": user_role,
                 }
             ), 200
 
@@ -1066,6 +1077,7 @@ def get_session_status():
                 "broker": session.get("broker"),
                 "api_key": api_key,
                 "active_sessions": active_count,
+                "role": user_role,
             }
         )
 
@@ -1081,6 +1093,7 @@ def get_session_status():
             "user": session.get("user"),
             "broker": session.get("broker"),
             "active_sessions": active_count,
+            "role": user_role,
         }
     )
 

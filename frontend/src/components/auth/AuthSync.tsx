@@ -15,7 +15,7 @@ interface AuthSyncProps {
  */
 export function AuthSync({ children }: AuthSyncProps) {
   const [isChecking, setIsChecking] = useState(true)
-  const { setUser, setApiKey, logout } = useAuthStore()
+  const { setUser, setApiKey, setSession, logout } = useAuthStore()
   const { fetchCapabilities, clearCapabilities } = useBrokerStore()
   const { setActiveSessionCount } = useSessionStore()
   const { syncAppMode } = useThemeStore()
@@ -37,7 +37,9 @@ export function AuthSync({ children }: AuthSyncProps) {
               broker: data.broker,
               isLoggedIn: true,
               loginTime: new Date().toISOString(),
+              role: data.role,
             })
+            setSession(true, data.role || 'user')
             // Store the API key for trading API calls
             if (data.api_key) {
               setApiKey(data.api_key)
@@ -51,13 +53,17 @@ export function AuthSync({ children }: AuthSyncProps) {
               setActiveSessionCount(data.active_sessions)
             }
           } else if (data.status === 'success' && data.authenticated && !data.logged_in) {
-            // User is logged in but hasn't connected broker yet
+            // User is logged in but hasn't connected broker yet (e.g. admin).
             setUser({
               username: data.user,
               broker: null,
               isLoggedIn: false,
               loginTime: null,
+              role: data.role,
             })
+            // Mark the app session active so the admin area (which needs no
+            // broker) can render even without a broker connection.
+            setSession(true, data.role || 'user')
             clearCapabilities()
           } else {
             // Not authenticated or status is not success - clear Zustand store
@@ -77,7 +83,7 @@ export function AuthSync({ children }: AuthSyncProps) {
     }
 
     syncSession()
-  }, [setUser, setApiKey, logout, fetchCapabilities, clearCapabilities, syncAppMode, setActiveSessionCount])
+  }, [setUser, setApiKey, setSession, logout, fetchCapabilities, clearCapabilities, syncAppMode, setActiveSessionCount])
 
   // Show nothing while checking - prevents flash of wrong content
   if (isChecking) {

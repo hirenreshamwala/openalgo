@@ -7,15 +7,22 @@ interface User {
   broker: string | null
   isLoggedIn: boolean
   loginTime: string | null
+  role?: string
 }
 
 interface AuthStore {
   user: User | null
   apiKey: string | null
   isAuthenticated: boolean
+  // True when the user has completed password/TOTP login, even if no broker
+  // is connected yet. Used to gate the multi-tenant admin area (admins have
+  // no broker session of their own).
+  isSessionActive: boolean
+  role: string
 
   setUser: (user: User) => void
   setApiKey: (apiKey: string | null) => void
+  setSession: (active: boolean, role: string) => void
   login: (username: string, broker: string) => void
   logout: () => void
   checkSession: () => boolean
@@ -27,10 +34,15 @@ export const useAuthStore = create<AuthStore>()(
       user: null,
       apiKey: null,
       isAuthenticated: false,
+      isSessionActive: false,
+      role: 'user',
 
-      setUser: (user) => set({ user, isAuthenticated: user.isLoggedIn }),
+      setUser: (user) =>
+        set({ user, isAuthenticated: user.isLoggedIn, role: user.role || 'user' }),
 
       setApiKey: (apiKey) => set({ apiKey }),
+
+      setSession: (active, role) => set({ isSessionActive: active, role: role || 'user' }),
 
       login: (username, broker) => {
         const user: User = {
@@ -39,11 +51,17 @@ export const useAuthStore = create<AuthStore>()(
           isLoggedIn: true,
           loginTime: new Date().toISOString(),
         }
-        set({ user, isAuthenticated: true })
+        set({ user, isAuthenticated: true, isSessionActive: true })
       },
 
       logout: () => {
-        set({ user: null, isAuthenticated: false, apiKey: null })
+        set({
+          user: null,
+          apiKey: null,
+          isAuthenticated: false,
+          isSessionActive: false,
+          role: 'user',
+        })
       },
 
       checkSession: () => {
