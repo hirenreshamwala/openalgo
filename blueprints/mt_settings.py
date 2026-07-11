@@ -7,6 +7,7 @@ The instance-wide .env broker config is not used in multi-tenant mode.
 """
 
 import os
+from urllib.parse import quote, unquote, urlsplit
 
 from flask import Blueprint, jsonify, redirect, request, session, url_for
 
@@ -18,6 +19,48 @@ from database.broker_creds_db import (
 )
 from utils.logging import get_logger
 from utils.session import require_user_session
+
+
+def _build_proxy_url(scheme: str, host: str, port: str, user: str, password: str) -> str:
+    """Assemble a proxy URL from separate parts. Returns '' if no host given.
+
+    Credentials are percent-encoded so passwords with @ : / etc. are safe.
+    """
+    host = (host or "").strip()
+    if not host:
+        return ""
+    scheme = (scheme or "http").strip().lower()
+    if scheme not in ("http", "https"):
+        scheme = "http"
+    auth = ""
+    user = (user or "").strip()
+    password = password or ""
+    if user:
+        auth = quote(user, safe="")
+        if password:
+            auth += ":" + quote(password, safe="")
+        auth += "@"
+    port = (port or "").strip()
+    netloc = f"{host}:{port}" if port else host
+    return f"{scheme}://{auth}{netloc}"
+
+
+def _parse_proxy_url(url: str | None) -> dict:
+    """Split a stored proxy URL back into parts for display/editing.
+
+    Returns {scheme, host, port, user, password}. Password is returned decoded
+    so it can prefill the edit form; the display path masks it separately.
+    """
+    parts = {"scheme": "http", "host": "", "port": "", "user": "", "password": ""}
+    if not url:
+        return parts
+    sp = urlsplit(url)
+    parts["scheme"] = sp.scheme or "http"
+    parts["host"] = sp.hostname or ""
+    parts["port"] = str(sp.port) if sp.port else ""
+    parts["user"] = unquote(sp.username) if sp.username else ""
+    parts["password"] = unquote(sp.password) if sp.password else ""
+    return parts
 
 logger = get_logger(__name__)
 
@@ -90,7 +133,13 @@ def broker_credentials_page():
             name = BROKER_DISPLAY.get(bid, bid)
             creds = get_broker_credentials(username, bid) or {}
             proxy = creds.get("proxy_url")
-            proxy_cell = f"<code>{proxy}</code>" if proxy else "<span class='muted'>direct</span>"
+            if proxy:
+                pp = _parse_proxy_url(proxy)
+                loc = f"{pp['host']}:{pp['port']}" if pp["port"] else pp["host"]
+                auth_note = " <span class='muted'>(auth)</span>" if pp["user"] else ""
+                proxy_cell = f"<code>{pp['scheme']}://{loc}</code>{auth_note}"
+            else:
+                proxy_cell = "<span class='muted'>direct</span>"
             saved_rows += (
                 f"<tr><td>{name}</td><td><code>{bid}</code></td><td>{proxy_cell}</td>"
                 f"<td><form method='post' action='/mt/broker-credentials/{bid}/delete' style='display:inline' "
@@ -134,9 +183,37 @@ button{{border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:
   <input id='api_key' name='api_key' type='text' autocomplete='off' required placeholder='Your broker API key'>
   <label for='api_secret'>API Secret</label>
   <input id='api_secret' name='api_secret' type='password' autocomplete='off' required placeholder='Your broker API secret'>
-  <label for='proxy_url'>Egress Proxy URL <span class='muted'>(optional)</span></label>
-  <input id='proxy_url' name='proxy_url' type='text' autocomplete='off' placeholder='http://user:pass@host:port  — leave blank for direct'>
-  <p class='muted' style='margin-top:6px'>If your broker whitelists a specific static IP, enter an HTTP/HTTPS proxy that egresses from that IP. All of your broker API calls will route through it.</p>
+  <fieldset style='border:1px solid #334155;border-radius:8px;padding:12px 16px;margin-top:16px'>
+    <legend class='muted' style='padding:0 6px'>Egress Proxy (optional)</legend>
+    <p class='muted' style='margin-top:0'>If your broker whitelists a specific static IP, enter a proxy that egresses from that IP. Leave Host blank for a direct connection.</p>
+    <div style='display:flex;gap:12px;flex-wrap:wrap'>
+      <div style='flex:0 0 110px'>
+        <label for='proxy_scheme'>Scheme</label>
+        <select id='proxy_scheme' name='proxy_scheme'>
+          <option value='http'>http</option>
+          <option value='https'>https</option>
+        </select>
+      </div>
+      <div style='flex:1 1 240px'>
+        <label for='proxy_host'>Host / IP</label>
+        <input id='proxy_host' name='proxy_host' type='text' autocomplete='off' placeholder='e.g. 203.0.113.10 or proxy.example.com'>
+      </div>
+      <div style='flex:0 0 110px'>
+        <label for='proxy_port'>Port</label>
+        <input id='proxy_port' name='proxy_port' type='text' autocomplete='off' placeholder='8080'>
+      </div>
+    </div>
+    <div style='display:flex;gap:12px;flex-wrap:wrap'>
+      <div style='flex:1 1 240px'>
+        <label for='proxy_user'>Username <span class='muted'>(optional)</span></label>
+        <input id='proxy_user' name='proxy_user' type='text' autocomplete='off' placeholder='proxy username'>
+      </div>
+      <div style='flex:1 1 240px'>
+        <label for='proxy_pass'>Password <span class='muted'>(optional)</span></label>
+        <input id='proxy_pass' name='proxy_pass' type='password' autocomplete='off' placeholder='proxy password'>
+      </div>
+    </div>
+  </fieldset>
   <button class='btn-save' type='submit'>Save credentials</button>
 </form>
 <p class='muted' style='margin-top:16px'>After saving, go to <a href='/broker' style='color:#38bdf8'>Broker Login</a> to connect.</p>
@@ -155,14 +232,23 @@ def save_broker_credentials_route():
     broker = (request.form.get("broker") or "").strip().lower()
     api_key = (request.form.get("api_key") or "").strip()
     api_secret = (request.form.get("api_secret") or "").strip()
-    proxy_url = (request.form.get("proxy_url") or "").strip()
+
+    proxy_host = (request.form.get("proxy_host") or "").strip()
+    proxy_port = (request.form.get("proxy_port") or "").strip()
+    proxy_url = _build_proxy_url(
+        request.form.get("proxy_scheme", "http"),
+        proxy_host,
+        proxy_port,
+        request.form.get("proxy_user", ""),
+        request.form.get("proxy_pass", ""),
+    )
 
     if broker not in BROKER_DISPLAY:
         return "Invalid broker", 400
     if not api_key or not api_secret:
         return "API key and secret are required", 400
-    if proxy_url and not proxy_url.lower().startswith(("http://", "https://")):
-        return "Proxy URL must start with http:// or https://", 400
+    if proxy_host and proxy_port and not proxy_port.isdigit():
+        return "Proxy port must be a number", 400
 
     if not save_broker_credentials(username, broker, api_key, api_secret, proxy_url=proxy_url):
         return "Failed to save credentials", 500
