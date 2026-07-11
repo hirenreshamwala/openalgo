@@ -411,7 +411,6 @@ def login():
             from database.auth_db import log_login_attempt
             log_login_attempt(username, ip, ua, status="success", login_type="password")
             if os.getenv("MULTI_TENANT", "false").lower() == "true":
-                from database.user_db import find_user_by_exact_username
                 u = find_user_by_exact_username(username)
                 if u and u.role == "admin":
                     return jsonify({"status": "success", "redirect": "/admin/mt/users"}), 200
@@ -514,7 +513,6 @@ def login_totp():
 
     log_login_attempt(pending_username, ip, ua, status="success", login_type="totp")
     if os.getenv("MULTI_TENANT", "false").lower() == "true":
-        from database.user_db import find_user_by_exact_username
         u = find_user_by_exact_username(pending_username)
         if u and u.role == "admin":
             return jsonify({"status": "success", "redirect": "/admin/mt/users"}), 200
