@@ -88,14 +88,17 @@ def broker_credentials_page():
         saved_rows = ""
         for bid in sorted(configured):
             name = BROKER_DISPLAY.get(bid, bid)
+            creds = get_broker_credentials(username, bid) or {}
+            proxy = creds.get("proxy_url")
+            proxy_cell = f"<code>{proxy}</code>" if proxy else "<span class='muted'>direct</span>"
             saved_rows += (
-                f"<tr><td>{name}</td><td><code>{bid}</code></td>"
+                f"<tr><td>{name}</td><td><code>{bid}</code></td><td>{proxy_cell}</td>"
                 f"<td><form method='post' action='/mt/broker-credentials/{bid}/delete' style='display:inline' "
                 f"onsubmit='return confirm(\"Remove {name} credentials?\")'>"
                 "<button class='btn-del' type='submit'>Remove</button></form></td></tr>"
             )
         saved_table = (
-            "<table><thead><tr><th>Broker</th><th>ID</th><th>Action</th></tr></thead>"
+            "<table><thead><tr><th>Broker</th><th>ID</th><th>Egress proxy</th><th>Action</th></tr></thead>"
             f"<tbody>{saved_rows}</tbody></table>"
         )
     else:
@@ -131,6 +134,9 @@ button{{border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:
   <input id='api_key' name='api_key' type='text' autocomplete='off' required placeholder='Your broker API key'>
   <label for='api_secret'>API Secret</label>
   <input id='api_secret' name='api_secret' type='password' autocomplete='off' required placeholder='Your broker API secret'>
+  <label for='proxy_url'>Egress Proxy URL <span class='muted'>(optional)</span></label>
+  <input id='proxy_url' name='proxy_url' type='text' autocomplete='off' placeholder='http://user:pass@host:port  — leave blank for direct'>
+  <p class='muted' style='margin-top:6px'>If your broker whitelists a specific static IP, enter an HTTP/HTTPS proxy that egresses from that IP. All of your broker API calls will route through it.</p>
   <button class='btn-save' type='submit'>Save credentials</button>
 </form>
 <p class='muted' style='margin-top:16px'>After saving, go to <a href='/broker' style='color:#38bdf8'>Broker Login</a> to connect.</p>
@@ -149,13 +155,16 @@ def save_broker_credentials_route():
     broker = (request.form.get("broker") or "").strip().lower()
     api_key = (request.form.get("api_key") or "").strip()
     api_secret = (request.form.get("api_secret") or "").strip()
+    proxy_url = (request.form.get("proxy_url") or "").strip()
 
     if broker not in BROKER_DISPLAY:
         return "Invalid broker", 400
     if not api_key or not api_secret:
         return "API key and secret are required", 400
+    if proxy_url and not proxy_url.lower().startswith(("http://", "https://")):
+        return "Proxy URL must start with http:// or https://", 400
 
-    if not save_broker_credentials(username, broker, api_key, api_secret):
+    if not save_broker_credentials(username, broker, api_key, api_secret, proxy_url=proxy_url):
         return "Failed to save credentials", 500
     logger.info("User %s saved broker credentials for %s", username, broker)
     return redirect(url_for("mt_settings_bp.broker_credentials_page"))

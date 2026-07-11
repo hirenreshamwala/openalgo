@@ -33,6 +33,7 @@ class UserBrokerCredentials(Base):
     api_key_enc = Column(Text, nullable=False)      # Fernet-encrypted
     api_secret_enc = Column(Text, nullable=False)   # Fernet-encrypted
     extras_enc = Column(Text, nullable=True)         # Fernet-encrypted JSON
+    proxy_url_enc = Column(Text, nullable=True)      # Fernet-encrypted outbound proxy URL
     __table_args__ = (
         UniqueConstraint("username", "broker", name="uq_user_broker"),
     )
@@ -49,8 +50,13 @@ def save_broker_credentials(
     api_key: str,
     api_secret: str,
     extras: dict | None = None,
+    proxy_url: str | None = None,
 ) -> bool:
-    """Encrypt and persist per-user broker credentials. Upserts on (username, broker)."""
+    """Encrypt and persist per-user broker credentials. Upserts on (username, broker).
+
+    proxy_url: optional outbound HTTP/HTTPS proxy for this user's broker calls so
+    the traffic egresses from the user's own registered static IP.
+    """
     from database.auth_db import encrypt_token
 
     try:
@@ -61,6 +67,8 @@ def save_broker_credentials(
         row.api_key_enc = encrypt_token(api_key)
         row.api_secret_enc = encrypt_token(api_secret)
         row.extras_enc = encrypt_token(json.dumps(extras or {}))
+        # Store only a non-empty proxy; clear it when blank.
+        row.proxy_url_enc = encrypt_token(proxy_url.strip()) if (proxy_url and proxy_url.strip()) else None
         db_session.commit()
         return True
     except Exception:
@@ -76,10 +84,12 @@ def get_broker_credentials(username: str, broker: str) -> dict | None:
     row = UserBrokerCredentials.query.filter_by(username=username, broker=broker).first()
     if row is None:
         return None
+    proxy_url = safe_decrypt_token(row.proxy_url_enc) if row.proxy_url_enc else None
     return {
         "api_key": safe_decrypt_token(row.api_key_enc) or row.api_key_enc,
         "api_secret": safe_decrypt_token(row.api_secret_enc) or row.api_secret_enc,
         "extras": json.loads(safe_decrypt_token(row.extras_enc) or "{}"),
+        "proxy_url": proxy_url or None,
     }
 
 

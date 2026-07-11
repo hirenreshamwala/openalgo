@@ -3,6 +3,7 @@ Shared httpx client module with connection pooling support for all broker APIs
 with automatic protocol negotiation (HTTP/2 when available, HTTP/1.1 fallback)
 """
 
+import threading
 from typing import Optional
 
 import httpx
@@ -12,27 +13,67 @@ from utils.logging import get_logger
 # Set up logging
 logger = get_logger(__name__)
 
-# Global httpx client for connection pooling
-_httpx_client = None
+# Connection-pooled httpx clients, keyed by outbound proxy URL. The key None is
+# the default (no proxy) client used by single-tenant deployments and by any
+# broker call made outside a per-user request context.
+#
+# Multi-tenant: each user may configure their own HTTP/HTTPS egress proxy so
+# their broker traffic exits from their own registered static IP (SEBI static-IP
+# mandate). httpx binds the proxy at CLIENT construction (not per request), so we
+# keep one pooled client per distinct proxy URL rather than creating a client per
+# call — creating a client per call would leak file descriptors under the
+# long-running single-worker eventlet/gunicorn process.
+_httpx_clients: dict[Optional[str], httpx.Client] = {}
+_clients_lock = threading.Lock()
+
+
+def _resolve_proxy() -> Optional[str]:
+    """Return the outbound proxy URL for the current request, or None.
+
+    Reads HTTP_PROXY from the per-request broker credential context (set by the
+    auth before_request hook in multi-tenant mode). Falls back to None so
+    single-tenant behavior is unchanged.
+    """
+    try:
+        from utils.broker_context import get_context_value
+
+        # Strictly context-only (no os.getenv fallback) so a host-level HTTP_PROXY
+        # never silently reroutes single-tenant broker traffic.
+        return get_context_value("HTTP_PROXY")
+    except Exception:
+        return None
 
 
 def get_httpx_client() -> httpx.Client:
     """
-    Returns an HTTP client with automatic protocol negotiation.
-    The client will use HTTP/2 when the server supports it,
-    otherwise automatically falls back to HTTP/1.1.
+    Returns a connection-pooled HTTP client with automatic protocol negotiation
+    (HTTP/2 when available, HTTP/1.1 fallback).
+
+    In multi-tenant mode the client is selected by the current user's configured
+    outbound proxy (from the request context), so each user's broker calls egress
+    from their own static IP. With no proxy configured, the shared default client
+    is returned — identical to the previous single-client behavior.
 
     Returns:
-        httpx.Client: A configured HTTP client with protocol auto-negotiation
+        httpx.Client: A configured, pooled HTTP client for the active proxy.
     """
-    global _httpx_client
+    proxy = _resolve_proxy()
 
-    if _httpx_client is None:
-        _httpx_client = _create_http_client()
-        logger.info(
-            "Created HTTP client with automatic protocol negotiation (HTTP/2 preferred, HTTP/1.1 fallback)"
-        )
-    return _httpx_client
+    client = _httpx_clients.get(proxy)
+    if client is not None and not client.is_closed:
+        return client
+
+    with _clients_lock:
+        # Re-check inside the lock (another thread may have created it).
+        client = _httpx_clients.get(proxy)
+        if client is None or client.is_closed:
+            client = _create_http_client(proxy=proxy)
+            _httpx_clients[proxy] = client
+            logger.info(
+                "Created pooled HTTP client (proxy=%s, HTTP/2 preferred, HTTP/1.1 fallback)",
+                proxy or "none",
+            )
+        return client
 
 
 def request(method: str, url: str, **kwargs) -> httpx.Response:
@@ -131,10 +172,14 @@ def delete(url: str, **kwargs) -> httpx.Response:
     return request("DELETE", url, **kwargs)
 
 
-def _create_http_client() -> httpx.Client:
+def _create_http_client(proxy: Optional[str] = None) -> httpx.Client:
     """
     Create a new HTTP client with automatic protocol negotiation and latency tracking.
     Enables both HTTP/2 and HTTP/1.1, letting httpx choose the best protocol.
+
+    Args:
+        proxy: Optional HTTP/HTTPS proxy URL to route all traffic through, so the
+            request egresses from a specific static IP. None means direct.
 
     Returns:
         httpx.Client: A configured HTTP client with protocol auto-negotiation and timing hooks
@@ -184,6 +229,7 @@ def _create_http_client() -> httpx.Client:
         client = httpx.Client(
             http2=http2_enabled,  # Disable HTTP/2 in standalone mode, enable in integrated mode
             http1=True,  # Always enable HTTP/1.1 for compatibility
+            proxy=proxy,  # None = direct; else route egress through the user's proxy
             timeout=120.0,  # Increased timeout for large historical data requests
             limits=httpx.Limits(
                 max_keepalive_connections=40,  # Increased from 20 for multi-strategy environments
@@ -196,6 +242,8 @@ def _create_http_client() -> httpx.Client:
             event_hooks={"request": [log_request], "response": [log_response]},
         )
 
+        if proxy:
+            logger.info("HTTP client configured with outbound proxy")
         if is_standalone:
             logger.info("Running in standalone mode - HTTP/2 disabled for compatibility")
         else:
@@ -210,7 +258,7 @@ def _create_http_client() -> httpx.Client:
 
 def cleanup_httpx_client() -> None:
     """
-    Closes the global httpx client and releases its resources.
+    Closes all pooled httpx clients (one per proxy) and releases their resources.
 
     Should be called when the application is shutting down to prevent
     resource leaks.
@@ -218,9 +266,13 @@ def cleanup_httpx_client() -> None:
     Returns:
         None
     """
-    global _httpx_client
-
-    if _httpx_client is not None:
-        _httpx_client.close()
-        _httpx_client = None
-        logger.info("Closed HTTP client")
+    with _clients_lock:
+        for key, client in list(_httpx_clients.items()):
+            try:
+                client.close()
+            except Exception:
+                logger.exception("Error closing HTTP client (proxy=%s)", key or "none")
+        count = len(_httpx_clients)
+        _httpx_clients.clear()
+        if count:
+            logger.info("Closed %d pooled HTTP client(s)", count)

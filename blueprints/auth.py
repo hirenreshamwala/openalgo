@@ -74,12 +74,17 @@ def _load_broker_credentials_into_context():
         app_url = os.getenv("HOST_SERVER", "http://127.0.0.1:5000").rstrip("/")
         creds = get_broker_credentials(username, broker)
         if creds:
-            set_broker_credentials({
+            ctx = {
                 "BROKER_API_KEY": creds["api_key"],
                 "BROKER_API_SECRET": creds["api_secret"],
                 "REDIRECT_URL": f"{app_url}/{broker}/callback",
                 **(creds.get("extras") or {}),
-            })
+            }
+            # Route this user's broker calls through their own egress proxy so the
+            # traffic exits from their registered static IP (SEBI static-IP mandate).
+            if creds.get("proxy_url"):
+                ctx["HTTP_PROXY"] = creds["proxy_url"]
+            set_broker_credentials(ctx)
     except Exception:
         pass  # Never block a request due to credential loading failure
 

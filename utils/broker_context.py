@@ -39,3 +39,16 @@ def get_broker_credential(key: str) -> str | None:
     if creds is not None:
         return creds.get(key) or os.getenv(key)
     return os.getenv(key)
+
+
+def get_context_value(key: str) -> str | None:
+    """Return a value strictly from the per-request context, with NO env fallback.
+
+    Used for settings (e.g. the outbound proxy) that must only take effect when a
+    per-user context is active, so single-tenant behavior stays byte-for-byte
+    unchanged even if a same-named env var happens to be set on the host.
+    """
+    creds = _CRED.get()
+    if creds is None:
+        return None
+    return creds.get(key) or None
