@@ -81,3 +81,28 @@ def get_broker_credentials(username: str, broker: str) -> dict | None:
         "api_secret": safe_decrypt_token(row.api_secret_enc) or row.api_secret_enc,
         "extras": json.loads(safe_decrypt_token(row.extras_enc) or "{}"),
     }
+
+
+def list_user_brokers(username: str) -> list[str]:
+    """Return the list of broker names the user has saved credentials for."""
+    rows = (
+        UserBrokerCredentials.query.filter_by(username=username)
+        .order_by(UserBrokerCredentials.broker)
+        .all()
+    )
+    return [r.broker for r in rows]
+
+
+def delete_broker_credentials(username: str, broker: str) -> bool:
+    """Delete a user's stored credentials for a broker. Returns True if a row was removed."""
+    try:
+        row = UserBrokerCredentials.query.filter_by(username=username, broker=broker).first()
+        if row is None:
+            return False
+        db_session.delete(row)
+        db_session.commit()
+        return True
+    except Exception:
+        logger.exception("Failed to delete broker credentials for %s/%s", username, broker)
+        db_session.rollback()
+        return False
