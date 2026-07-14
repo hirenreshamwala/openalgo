@@ -1,5 +1,7 @@
-import { BookOpen, ExternalLink, Info, Loader2 } from 'lucide-react'
+import { BookOpen, ExternalLink, Info, Loader2, LogOut } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { authApi } from '@/api/auth'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -76,7 +78,8 @@ function generateRandomState(): string {
 }
 
 export default function BrokerSelect() {
-  const { user } = useAuthStore()
+  const { user, logout } = useAuthStore()
+  const navigate = useNavigate()
   const [selectedBroker, setSelectedBroker] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -138,6 +141,16 @@ export default function BrokerSelect() {
       const cfg = mtBrokers.find((b) => b.broker_name === value)
       if (cfg) setBrokerConfig(cfg)
     }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await authApi.logout()
+    } catch {
+      // ignore — clear client state regardless
+    }
+    logout()
+    navigate('/login', { replace: true })
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -360,6 +373,16 @@ export default function BrokerSelect() {
                   </a>
                 </p>
               )}
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full mt-4"
+                onClick={handleLogout}
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </Button>
             </CardContent>
           </Card>
 
