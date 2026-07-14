@@ -1299,52 +1299,58 @@ def get_dashboard_data():
 
 @auth_bp.route("/logout", methods=["GET", "POST"])
 def logout():
-    if session.get("logged_in"):
-        username = session["user"]
+    username = session.get("user")
+    if username:
+        # Broker-session teardown only applies when a broker was actually
+        # connected (session["logged_in"] is set only after broker OAuth).
+        # An admin or a user who hasn't connected a broker has session["user"]
+        # but NOT "logged_in" — we must still clear their app session below,
+        # otherwise logout appears to do nothing and bounces them back.
+        if session.get("logged_in"):
+            # Clear cache entries before database update to prevent stale data access
+            cache_key_auth = f"auth-{username}"
+            cache_key_feed = f"feed-{username}"
+            if cache_key_auth in auth_cache:
+                del auth_cache[cache_key_auth]
+                logger.info(f"Cleared auth cache for user: {username}")
+            if cache_key_feed in feed_token_cache:
+                del feed_token_cache[cache_key_feed]
+                logger.info(f"Cleared feed token cache for user: {username}")
 
-        # Clear cache entries before database update to prevent stale data access
-        cache_key_auth = f"auth-{username}"
-        cache_key_feed = f"feed-{username}"
-        if cache_key_auth in auth_cache:
-            del auth_cache[cache_key_auth]
-            logger.info(f"Cleared auth cache for user: {username}")
-        if cache_key_feed in feed_token_cache:
-            del feed_token_cache[cache_key_feed]
-            logger.info(f"Cleared feed token cache for user: {username}")
+            # Clear symbol cache on logout
+            try:
+                from database.master_contract_cache_hook import clear_cache_on_logout
 
-        # Clear symbol cache on logout
-        try:
-            from database.master_contract_cache_hook import clear_cache_on_logout
+                clear_cache_on_logout()
+                logger.info("Cleared symbol cache on logout")
+            except Exception as cache_error:
+                logger.exception(f"Error clearing symbol cache on logout: {cache_error}")
 
-            clear_cache_on_logout()
-            logger.info("Cleared symbol cache on logout")
-        except Exception as cache_error:
-            logger.exception(f"Error clearing symbol cache on logout: {cache_error}")
+            # writing to database
+            inserted_id = upsert_auth(username, "", "", revoke=True)
+            if inserted_id is not None:
+                logger.info(f"Database Upserted record with ID: {inserted_id}")
+                logger.info(f"Auth Revoked in the Database for user: {username}")
+            else:
+                logger.error(f"Failed to upsert auth token for user: {username}")
 
-        # writing to database
-        inserted_id = upsert_auth(username, "", "", revoke=True)
-        if inserted_id is not None:
-            logger.info(f"Database Upserted record with ID: {inserted_id}")
-            logger.info(f"Auth Revoked in the Database for user: {username}")
-        else:
-            logger.error(f"Failed to upsert auth token for user: {username}")
+            # Notify all connected devices to logout immediately
+            socketio.emit("force_logout", {
+                "message": "You have been logged out from another device.",
+            })
 
-        # Clear ALL sessions for this user (logout means all devices)
+            # Update session count to 0
+            socketio.emit("active_sessions_update", {
+                "count": 0,
+                "sessions": [],
+            })
+
+        # Clear ALL server-side sessions for this user (logout = all devices).
+        # Runs for every authenticated user, broker-connected or not.
         from database.auth_db import clear_user_sessions
         clear_user_sessions(username)
 
-        # Notify all connected devices to logout immediately
-        socketio.emit("force_logout", {
-            "message": "You have been logged out from another device.",
-        })
-
-        # Update session count to 0
-        socketio.emit("active_sessions_update", {
-            "count": 0,
-            "sessions": [],
-        })
-
-        # Clear entire session to ensure complete logout
+        # Clear entire Flask session to ensure complete logout
         session.clear()
         logger.info(f"Session cleared for user: {username}")
 
