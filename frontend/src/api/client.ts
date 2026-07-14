@@ -1,6 +1,22 @@
 import axios from 'axios'
+import { useAuthStore } from '@/stores/authStore'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
+
+// A 401 from a broker-gated endpoint when the user is logged in but has no
+// broker connected is NOT a session expiry — don't bounce them to /login
+// (that looks like a surprise logout). Send them to the dashboard, which shows
+// the "connect broker" prompt. Genuine no-session 401s still go to /login.
+function handleUnauthorized() {
+  const { isSessionActive, user } = useAuthStore.getState()
+  if (isSessionActive && !user?.broker) {
+    if (window.location.pathname !== '/dashboard') {
+      window.location.href = '/dashboard'
+    }
+  } else {
+    window.location.href = '/login'
+  }
+}
 
 // Helper to fetch CSRF token
 export async function fetchCSRFToken(): Promise<string> {
@@ -35,8 +51,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Handle unauthorized - redirect to login
-      window.location.href = '/login'
+      handleUnauthorized()
     }
     return Promise.reject(error)
   }
@@ -124,8 +139,7 @@ webClient.interceptors.response.use(
   (error) => {
     const status = error.response?.status
     if (status === 401) {
-      // Unauthorized - redirect to login
-      window.location.href = '/login'
+      handleUnauthorized()
     } else if (status === 403) {
       // Forbidden - user doesn't have permission for this resource
       // Create a more descriptive error for the caller to handle
