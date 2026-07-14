@@ -65,8 +65,9 @@ export default function Login() {
             sessionData.authenticated &&
             !sessionData.logged_in
           ) {
-            // Logged in but no broker, go to broker selection
-            navigate('/broker', { replace: true })
+            // Logged in but no broker: land on the dashboard (shell + connect
+            // prompt), not the broker screen — connecting is optional to browse.
+            navigate('/dashboard', { replace: true })
             return
           }
         }
@@ -146,8 +147,9 @@ export default function Login() {
         if (data.redirect && data.redirect.startsWith('/admin/')) {
           window.location.href = data.redirect
         } else {
-          // Use redirect from response if provided, otherwise go to broker
-          navigate(data.redirect || '/broker')
+          // Use redirect from response if provided, otherwise land on the
+          // dashboard (shell + connect-broker prompt when no broker yet).
+          navigate(data.redirect || '/dashboard')
         }
       }
     } catch (_err) {
@@ -202,7 +204,7 @@ export default function Login() {
       if (data.redirect && data.redirect.startsWith('/admin/')) {
         window.location.href = data.redirect
       } else {
-        navigate(data.redirect || '/broker')
+        navigate(data.redirect || '/dashboard')
       }
     } catch (_err) {
       setError('Failed to verify TOTP. Please try again.')

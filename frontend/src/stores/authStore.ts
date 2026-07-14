@@ -45,13 +45,16 @@ export const useAuthStore = create<AuthStore>()(
       setSession: (active, role) => set({ isSessionActive: active, role: role || 'user' }),
 
       login: (username, broker) => {
+        // isAuthenticated (broker session live, gates the socket) requires a
+        // broker. isSessionActive (app shell access) only needs the login.
+        const hasBroker = !!broker
         const user: User = {
           username,
-          broker,
-          isLoggedIn: true,
+          broker: broker || null,
+          isLoggedIn: hasBroker,
           loginTime: new Date().toISOString(),
         }
-        set({ user, isAuthenticated: true, isSessionActive: true })
+        set({ user, isAuthenticated: hasBroker, isSessionActive: true })
       },
 
       logout: () => {

@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 
 interface MarginData {
@@ -60,6 +61,8 @@ function getPnLBadgeVariant(value: string | number): 'default' | 'destructive' |
 }
 
 export default function Dashboard() {
+  const { user } = useAuthStore()
+  const noBroker = !user?.broker
   const [marginData, setMarginData] = useState<MarginData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -73,6 +76,11 @@ export default function Dashboard() {
 
   // Fetch dashboard funds data
   const fetchFundsData = useCallback(async () => {
+    // No broker connected → nothing to fetch; the connect-broker view renders.
+    if (noBroker) {
+      setIsLoading(false)
+      return
+    }
     try {
       setIsLoading(true)
       const response = await fetch('/auth/dashboard-data', {
@@ -266,6 +274,26 @@ export default function Dashboard() {
       borderColor: 'border-orange-500/20 hover:border-orange-500/40',
     },
   ]
+
+  // Logged in but no broker connected yet: show a friendly connect prompt
+  // instead of empty margin cards (the app shell + menus are still usable).
+  if (noBroker) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4 text-center">
+        <h1 className="text-2xl font-bold">Welcome to OpenAlgo</h1>
+        <p className="text-muted-foreground max-w-md">
+          Connect your broker to see your funds, positions, orders and live market data. You can
+          browse the menus now, but trading views need a connected broker.
+        </p>
+        <Link
+          to="/broker"
+          className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          Connect your broker
+        </Link>
+      </div>
+    )
+  }
 
   // Broker token expired but the app session is fine: send the user to the
   // broker reconnect flow, not /login (which would bounce back) — #1400.
