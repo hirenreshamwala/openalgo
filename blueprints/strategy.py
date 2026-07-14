@@ -45,7 +45,7 @@ from database.strategy_db import (
 from database.symbol import enhanced_search_symbols
 from limiter import limiter
 from utils.logging import get_logger
-from utils.session import check_session_validity, is_session_valid
+from utils.session import check_session_validity, is_session_valid, require_user_session
 
 logger = get_logger(__name__)
 
@@ -492,7 +492,7 @@ def toggle_strategy_route(strategy_id):
 
 
 @strategy_bp.route("/<int:strategy_id>/delete", methods=["POST"])
-@check_session_validity
+@require_user_session
 @limiter.limit(STRATEGY_RATE_LIMIT)
 def delete_strategy_route(strategy_id):
     """Delete strategy"""
@@ -693,9 +693,14 @@ def search_symbols():
 
 
 @strategy_bp.route("/api/strategies")
-@check_session_validity
+@require_user_session
 def api_get_strategies():
-    """API: Get all strategies for current user as JSON"""
+    """API: Get all strategies for current user as JSON.
+
+    Uses require_user_session (login only, no broker) so users can view/manage
+    their webhook strategies before connecting a broker. Order execution still
+    requires a broker at webhook time.
+    """
     user_id = session.get("user")
     if not user_id:
         return jsonify({"status": "error", "message": "Session expired"}), 401
@@ -725,7 +730,7 @@ def api_get_strategies():
 
 
 @strategy_bp.route("/api/strategy/<int:strategy_id>")
-@check_session_validity
+@require_user_session
 def api_get_strategy(strategy_id):
     """API: Get single strategy with mappings as JSON"""
     user_id = session.get("user")
@@ -773,7 +778,7 @@ def api_get_strategy(strategy_id):
 
 
 @strategy_bp.route("/api/strategy", methods=["POST"])
-@check_session_validity
+@require_user_session
 @limiter.limit(STRATEGY_RATE_LIMIT)
 def api_create_strategy():
     """API: Create new strategy (JSON)"""
@@ -841,7 +846,7 @@ def api_create_strategy():
 
 
 @strategy_bp.route("/api/strategy/<int:strategy_id>/toggle", methods=["POST"])
-@check_session_validity
+@require_user_session
 def api_toggle_strategy(strategy_id):
     """API: Toggle strategy active status (JSON)"""
     user_id = session.get("user")
