@@ -676,6 +676,17 @@ def setup_environment(app):
                 ("Strategy Portfolio DB", ensure_strategy_portfolio_tables_exists),
             ]
 
+            # Multi-tenant-only tables (per-user broker credentials + parent/child
+            # symbols). Created here so a fresh deploy self-provisions them via
+            # create_all, consistent with every other table; Alembic remains the
+            # path for upgrading a pre-existing single-tenant database.
+            if os.getenv("MULTI_TENANT", "false").lower() == "true":
+                from database.broker_creds_db import init_db as ensure_broker_creds_tables_exists
+                from database.symbols_db import init_db as ensure_mt_symbols_tables_exists
+
+                db_init_functions.append(("Broker Creds DB", ensure_broker_creds_tables_exists))
+                db_init_functions.append(("MT Symbols DB", ensure_mt_symbols_tables_exists))
+
             db_init_start = time.time()
             with ThreadPoolExecutor(max_workers=15) as executor:
                 futures = {executor.submit(func): name for name, func in db_init_functions}
