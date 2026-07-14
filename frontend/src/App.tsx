@@ -15,6 +15,7 @@ const Home = lazy(() => import('@/pages/Home'))
 const Faq = lazy(() => import('@/pages/Faq'))
 const Setup = lazy(() => import('@/pages/Setup'))
 const Login = lazy(() => import('@/pages/Login'))
+const Register = lazy(() => import('@/pages/Register'))
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'))
 const Download = lazy(() => import('@/pages/Download'))
 const ServerError = lazy(() => import('@/pages/ServerError'))
@@ -166,6 +167,7 @@ function App() {
               <Route path="/faq" element={<Faq />} />
               <Route path="/setup" element={<Setup />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/download" element={<Download />} />
               <Route path="/error" element={<ServerError />} />

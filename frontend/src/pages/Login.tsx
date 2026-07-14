@@ -29,6 +29,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isCheckingSetup, setIsCheckingSetup] = useState(true)
+  const [multiTenant, setMultiTenant] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Check if setup is required or already logged in on page load
@@ -40,6 +41,7 @@ export default function Login() {
           credentials: 'include',
         })
         const setupData = await setupResponse.json()
+        setMultiTenant(!!setupData.multi_tenant)
         if (setupData.needs_setup) {
           navigate('/setup', { replace: true })
           return
@@ -312,6 +314,15 @@ export default function Login() {
                       </>
                     )}
                   </Button>
+
+                  {multiTenant && (
+                    <div className="text-center pt-2">
+                      <span className="text-sm text-muted-foreground">Don't have an account? </span>
+                      <Link to="/register" className="text-sm text-primary hover:underline">
+                        Register
+                      </Link>
+                    </div>
+                  )}
                 </form>
               ) : (
                 <form onSubmit={handleTotpSubmit} className="space-y-4">
