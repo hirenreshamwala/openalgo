@@ -169,10 +169,25 @@ def broker_credentials_page():
     elif request.args.get("error"):
         flash_html = f"<div class='flash err'>{request.args['error']}</div>"
 
-    # Options for the add/edit dropdown — all 34 supported brokers.
-    options = "".join(
-        f"<option value='{bid}'>{name}</option>" for bid, name in SUPPORTED_BROKERS
-    )
+    # One broker per user: if a broker is already configured, the add/update
+    # form is locked to that broker (only its keys/proxy can be updated). To
+    # switch brokers the user must remove the current one first. When nothing
+    # is configured yet, all 34 brokers are offered.
+    current_broker = next(iter(configured), None)
+    if current_broker:
+        options = f"<option value='{current_broker}'>{BROKER_DISPLAY.get(current_broker, current_broker)}</option>"
+        add_heading = "Update your broker"
+        switch_note = (
+            f"<p class='muted'>You have <strong>{BROKER_DISPLAY.get(current_broker, current_broker)}</strong> "
+            "configured. Update its API key / secret / proxy below. To use a different broker, remove it "
+            "first &mdash; only one broker per account.</p>"
+        )
+    else:
+        options = "".join(
+            f"<option value='{bid}'>{name}</option>" for bid, name in SUPPORTED_BROKERS
+        )
+        add_heading = "Add your broker"
+        switch_note = ""
 
     # Table of already-configured brokers.
     if configured:
@@ -245,13 +260,14 @@ button{{border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:
 </style></head><body>
 <nav><a href='/broker'>&#8592; Broker Login</a><a href='/mt/broker-credentials'>&#8635; Refresh</a></nav>
 <h1>Broker Credentials</h1>
-<p class='muted'>Signed in as <strong>{username}</strong>. Add the API key &amp; secret for each broker you want to trade with. Stored encrypted, per user.</p>
+<p class='muted'>Signed in as <strong>{username}</strong>. Add the API key &amp; secret for your broker. One broker per account, stored encrypted.</p>
 {flash_html}
 {ip_banner}
 <h2>Configured brokers</h2>
 {saved_table}
 
-<h2>Add / update a broker</h2>
+<h2>{add_heading}</h2>
+{switch_note}
 <form class='add' method='post' action='/mt/broker-credentials'>
   <input type='hidden' name='csrf_token' value='{csrf_token}'>
   <label for='broker'>Broker</label>
@@ -324,6 +340,16 @@ def save_broker_credentials_route():
 
     if broker not in BROKER_DISPLAY:
         return redirect(f"{page}?error=Invalid+broker")
+
+    # One broker per user. Allow updating the already-configured broker, but
+    # reject adding a second, different one (defense-in-depth behind the locked
+    # UI dropdown). The user must remove the current broker first to switch.
+    existing = list_user_brokers(username)
+    if existing and broker not in existing:
+        return redirect(
+            f"{page}?error=Only+one+broker+per+account.+Remove+the+current+broker+to+switch."
+        )
+
     if not api_key or not api_secret:
         return redirect(f"{page}?error=API+key+and+secret+are+required")
     if proxy_host and proxy_port and not proxy_port.isdigit():
