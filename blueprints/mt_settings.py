@@ -12,6 +12,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 from flask import Blueprint, jsonify, redirect, request, session, url_for
+from flask_wtf.csrf import generate_csrf
 
 from database.broker_creds_db import (
     delete_broker_credentials,
@@ -153,6 +154,21 @@ def broker_credentials_page():
     username = session.get("user")
     configured = set(list_user_brokers(username))
 
+    # CSRF token — the app runs Flask-WTF CSRFProtect globally, so every POST
+    # form must carry this hidden field or the submit is rejected with 400.
+    csrf_token = generate_csrf()
+
+    # Feedback banner from the post/redirect/get flow.
+    flash_html = ""
+    if request.args.get("saved"):
+        b = BROKER_DISPLAY.get(request.args["saved"], request.args["saved"])
+        flash_html = f"<div class='flash ok'>Saved credentials for {b}.</div>"
+    elif request.args.get("removed"):
+        b = BROKER_DISPLAY.get(request.args["removed"], request.args["removed"])
+        flash_html = f"<div class='flash ok'>Removed {b}.</div>"
+    elif request.args.get("error"):
+        flash_html = f"<div class='flash err'>{request.args['error']}</div>"
+
     # Options for the add/edit dropdown — all 34 supported brokers.
     options = "".join(
         f"<option value='{bid}'>{name}</option>" for bid, name in SUPPORTED_BROKERS
@@ -176,6 +192,7 @@ def broker_credentials_page():
                 f"<tr><td>{name}</td><td><code>{bid}</code></td><td>{proxy_cell}</td>"
                 f"<td><form method='post' action='/mt/broker-credentials/{bid}/delete' style='display:inline' "
                 f"onsubmit='return confirm(\"Remove {name} credentials?\")'>"
+                f"<input type='hidden' name='csrf_token' value='{csrf_token}'>"
                 "<button class='btn-del' type='submit'>Remove</button></form></td></tr>"
             )
         saved_table = (
@@ -222,16 +239,21 @@ button{{border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:
 .ipbox{{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#0b2545;border:1px solid #1d4ed8;border-radius:8px;padding:14px 18px;margin-top:16px}}
 .ipbox .ip{{font-family:ui-monospace,monospace;font-size:1.3rem;font-weight:700;color:#7dd3fc;letter-spacing:.02em}}
 .btn-copy{{background:#1d4ed8;color:#fff;padding:6px 14px;margin:0;font-size:13px}}
+.flash{{padding:11px 16px;border-radius:8px;margin-top:16px;font-size:14px;font-weight:500}}
+.flash.ok{{background:#052e1b;border:1px solid #16a34a;color:#86efac}}
+.flash.err{{background:#3f1212;border:1px solid #dc2626;color:#fca5a5}}
 </style></head><body>
 <nav><a href='/broker'>&#8592; Broker Login</a><a href='/mt/broker-credentials'>&#8635; Refresh</a></nav>
 <h1>Broker Credentials</h1>
 <p class='muted'>Signed in as <strong>{username}</strong>. Add the API key &amp; secret for each broker you want to trade with. Stored encrypted, per user.</p>
+{flash_html}
 {ip_banner}
 <h2>Configured brokers</h2>
 {saved_table}
 
 <h2>Add / update a broker</h2>
 <form class='add' method='post' action='/mt/broker-credentials'>
+  <input type='hidden' name='csrf_token' value='{csrf_token}'>
   <label for='broker'>Broker</label>
   <select id='broker' name='broker' required>{options}</select>
   <label for='api_key'>API Key</label>
@@ -298,17 +320,19 @@ def save_broker_credentials_route():
         request.form.get("proxy_pass", ""),
     )
 
+    page = url_for("mt_settings_bp.broker_credentials_page")
+
     if broker not in BROKER_DISPLAY:
-        return "Invalid broker", 400
+        return redirect(f"{page}?error=Invalid+broker")
     if not api_key or not api_secret:
-        return "API key and secret are required", 400
+        return redirect(f"{page}?error=API+key+and+secret+are+required")
     if proxy_host and proxy_port and not proxy_port.isdigit():
-        return "Proxy port must be a number", 400
+        return redirect(f"{page}?error=Proxy+port+must+be+a+number")
 
     if not save_broker_credentials(username, broker, api_key, api_secret, proxy_url=proxy_url):
-        return "Failed to save credentials", 500
+        return redirect(f"{page}?error=Failed+to+save+credentials")
     logger.info("User %s saved broker credentials for %s", username, broker)
-    return redirect(url_for("mt_settings_bp.broker_credentials_page"))
+    return redirect(f"{page}?saved={broker}")
 
 
 @mt_settings_bp.route("/broker-credentials/<broker>/delete", methods=["POST"])
@@ -319,9 +343,11 @@ def delete_broker_credentials_route(broker):
         return jsonify(status="error", message="Not available"), 404
 
     username = session.get("user")
-    delete_broker_credentials(username, broker.strip().lower())
+    broker = broker.strip().lower()
+    delete_broker_credentials(username, broker)
     logger.info("User %s removed broker credentials for %s", username, broker)
-    return redirect(url_for("mt_settings_bp.broker_credentials_page"))
+    page = url_for("mt_settings_bp.broker_credentials_page")
+    return redirect(f"{page}?removed={broker}")
 
 
 @mt_settings_bp.route("/broker-config", methods=["GET"])
