@@ -214,11 +214,6 @@ def check_session_validity(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not is_session_valid():
-            # Revoke tokens before clearing session
-            revoke_user_tokens()
-            session.clear()
-
-            # Check if this is an AJAX/fetch request
             from flask import jsonify, request
 
             is_ajax = (
@@ -227,6 +222,28 @@ def check_session_validity(f):
                 or request.content_type == "application/json"
                 or request.is_json
             )
+
+            # A user who is logged in (has an app session) but has NOT connected
+            # a broker has session["user"] set without the "logged_in" flag.
+            # That is a valid app session, not an expired one — do NOT revoke
+            # tokens or clear the session here, or every broker-gated endpoint a
+            # no-broker user touches (e.g. global market-status polling) would
+            # silently destroy their session and log them out. Just refuse this
+            # broker-required endpoint; the app shell stays usable.
+            if session.get("user") and not session.get("logged_in"):
+                if is_ajax:
+                    return jsonify(
+                        {
+                            "status": "error",
+                            "error": "broker_required",
+                            "message": "Connect a broker to use this feature.",
+                        }
+                    ), 401
+                return redirect("/dashboard")
+
+            # Genuine expiry / no session at all: revoke tokens and clear.
+            revoke_user_tokens()
+            session.clear()
 
             if is_ajax:
                 # Return JSON response for AJAX requests instead of redirect

@@ -315,7 +315,7 @@ def api_freeze_upload():
 
 
 @admin_bp.route("/api/holidays")
-@check_session_validity
+@require_user_session
 @limiter.limit(API_RATE_LIMIT)
 def api_holidays_list():
     """Get holidays for a specific year"""
@@ -479,7 +479,7 @@ def api_holiday_delete(id):
 
 
 @admin_bp.route("/api/timings")
-@check_session_validity
+@require_user_session
 @limiter.limit(API_RATE_LIMIT)
 def api_timings_list():
     """Get all market timings"""
