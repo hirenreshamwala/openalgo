@@ -67,10 +67,21 @@ def _load_broker_credentials_into_context():
         from database.broker_creds_db import get_broker_credentials
         from utils.broker_context import set_broker_credentials
 
-        auth_row = Auth.query.filter_by(name=username).first()
-        if not auth_row or not auth_row.broker:
+        # Which broker's credentials to load:
+        #  1. During a broker connect flow the URL carries the broker
+        #     (e.g. /fyers/callback, /fyers/auth) — use that, because the user
+        #     has no Auth row yet on a first connect. Without this the broker's
+        #     authenticate_broker() would read the placeholder env credentials
+        #     and the OAuth callback would silently fail.
+        #  2. Otherwise use the user's already-connected broker (Auth.broker).
+        broker = None
+        if request.view_args and request.view_args.get("broker"):
+            broker = request.view_args["broker"]
+        if not broker:
+            auth_row = Auth.query.filter_by(name=username).first()
+            broker = auth_row.broker if auth_row else None
+        if not broker:
             return
-        broker = auth_row.broker
         app_url = os.getenv("HOST_SERVER", "http://127.0.0.1:5000").rstrip("/")
         creds = get_broker_credentials(username, broker)
         if creds:
