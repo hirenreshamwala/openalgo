@@ -331,31 +331,31 @@ def squareoff_positions(strategy_id):
 
 
 @strategy_bp.route("/")
+@require_user_session
 def index():
-    """List all strategies"""
-    if not is_session_valid():
-        return redirect(url_for("auth.login"))
+    """Strategy page. Served by the React SPA on a full-page load.
 
-    user_id = session.get("user")
-    if not user_id:
-        flash("Please login to continue", "error")
-        return redirect(url_for("auth.login"))
+    Requires a login only (no broker) so the page is reachable before a broker
+    is connected — the React StrategyIndex fetches /strategy/api/strategies,
+    which is likewise login-gated. This replaces the legacy server-rendered
+    template that used is_session_valid() (broker required) and bounced
+    no-broker users to the login page.
+    """
+    from blueprints.react_app import serve_react_app
 
-    try:
-        logger.info(f"Fetching strategies for user: {user_id}")
-        strategies = get_user_strategies(user_id)
-        return render_template("strategy/index.html", strategies=strategies)
-    except Exception as e:
-        logger.exception(f"Error in index route: {str(e)}")
-        flash("Error loading strategies", "error")
-        return redirect(url_for("dashboard_bp.index"))
+    return serve_react_app()
 
 
 @strategy_bp.route("/new", methods=["GET", "POST"])
-@check_session_validity
+@require_user_session
 @limiter.limit(STRATEGY_RATE_LIMIT)
 def new_strategy():
-    """Create new strategy"""
+    """Create new strategy. GET serves the React SPA (login-gated, no broker);
+    POST keeps the legacy form handler for backward compatibility."""
+    if request.method == "GET":
+        from blueprints.react_app import serve_react_app
+
+        return serve_react_app()
     if request.method == "POST":
         try:
             # Get user_id from session
@@ -440,25 +440,16 @@ def new_strategy():
 
 
 @strategy_bp.route("/<int:strategy_id>")
+@require_user_session
 def view_strategy(strategy_id):
-    """View strategy details"""
-    if not is_session_valid():
-        return redirect(url_for("auth.login"))
+    """Strategy detail page. Served by the React SPA on a full-page load.
 
-    strategy = get_strategy(strategy_id)
-    if not strategy:
-        flash("Strategy not found", "error")
-        return redirect(url_for("strategy_bp.index"))
+    Login-gated (no broker) for the same reason as index() — the React
+    ViewStrategy page fetches the login-gated /strategy/api/strategy/<id>.
+    """
+    from blueprints.react_app import serve_react_app
 
-    if strategy.user_id != session.get("user"):
-        flash("Unauthorized access", "error")
-        return redirect(url_for("strategy_bp.index"))
-
-    symbol_mappings = get_symbol_mappings(strategy_id)
-
-    return render_template(
-        "strategy/view_strategy.html", strategy=strategy, symbol_mappings=symbol_mappings
-    )
+    return serve_react_app()
 
 
 @strategy_bp.route("/toggle/<int:strategy_id>", methods=["POST"])
@@ -525,10 +516,15 @@ def delete_strategy_route(strategy_id):
 
 
 @strategy_bp.route("/<int:strategy_id>/configure", methods=["GET", "POST"])
-@check_session_validity
+@require_user_session
 @limiter.limit(STRATEGY_RATE_LIMIT)
 def configure_symbols(strategy_id):
-    """Configure symbols for strategy"""
+    """Configure symbols for strategy. GET serves the React SPA (login-gated);
+    POST keeps the legacy add-symbol handler."""
+    if request.method == "GET":
+        from blueprints.react_app import serve_react_app
+
+        return serve_react_app()
     user_id = session.get("user")
     if not user_id:
         flash("Session expired. Please login again.", "error")
