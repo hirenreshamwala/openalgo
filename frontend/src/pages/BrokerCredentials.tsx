@@ -27,7 +27,9 @@ export default function BrokerCredentials() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [currentBroker, setCurrentBroker] = useState<string | null>(null)
+  const [hostServer, setHostServer] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   const [broker, setBroker] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -40,6 +42,7 @@ export default function BrokerCredentials() {
       const res = await webClient.get('/mt/api/broker-credentials')
       const data = res.data
       setCurrentBroker(data.current_broker || null)
+      setHostServer((data.host_server || window.location.origin).replace(/\/$/, ''))
       if (data.current_broker) {
         setBroker(data.current_broker)
         setProxy({
@@ -182,6 +185,33 @@ export default function BrokerCredentials() {
                 </SelectContent>
               </Select>
             </div>
+
+            {broker && (
+              <div className="space-y-1.5">
+                <Label>Callback / Redirect URL</Label>
+                <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+                  <code className="flex-1 text-sm break-all">
+                    {hostServer}/{broker}/callback
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${hostServer}/${broker}/callback`)
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 1500)
+                    }}
+                  >
+                    {copied ? 'Copied' : 'Copy'}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Register this exact URL as the redirect / callback URL in your{' '}
+                  {brokerName(broker)} developer app.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="apiKey">API Key</Label>

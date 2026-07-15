@@ -267,7 +267,17 @@ def api_broker_credentials_get():
         proxy = _parse_proxy_url(creds.get("proxy_url"))
     # Do not leak the proxy password to the client; only say whether one is set.
     has_pass = bool(proxy.pop("password", ""))
-    return jsonify(status="success", current_broker=current, proxy=proxy, proxy_has_password=has_pass)
+    # Base used to build each broker's callback/redirect URL
+    # ({host_server}/{broker}/callback) that the user registers on the broker's
+    # developer portal.
+    host_server = os.getenv("HOST_SERVER", "http://127.0.0.1:5000").rstrip("/")
+    return jsonify(
+        status="success",
+        current_broker=current,
+        proxy=proxy,
+        proxy_has_password=has_pass,
+        host_server=host_server,
+    )
 
 
 @mt_settings_bp.route("/api/broker-credentials", methods=["POST"])
