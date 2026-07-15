@@ -29,6 +29,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isCheckingSetup, setIsCheckingSetup] = useState(true)
+  const [multiTenant, setMultiTenant] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Check if setup is required or already logged in on page load
@@ -40,6 +41,7 @@ export default function Login() {
           credentials: 'include',
         })
         const setupData = await setupResponse.json()
+        setMultiTenant(!!setupData.multi_tenant)
         if (setupData.needs_setup) {
           navigate('/setup', { replace: true })
           return
@@ -63,8 +65,9 @@ export default function Login() {
             sessionData.authenticated &&
             !sessionData.logged_in
           ) {
-            // Logged in but no broker, go to broker selection
-            navigate('/broker', { replace: true })
+            // Logged in but no broker: land on the dashboard (shell + connect
+            // prompt), not the broker screen — connecting is optional to browse.
+            navigate('/dashboard', { replace: true })
             return
           }
         }
@@ -139,8 +142,15 @@ export default function Login() {
         // Set login state (broker from response if session was resumed, empty otherwise)
         setLogin(username, data.broker || '')
         showToast.success('Login successful', 'system')
-        // Use redirect from response if provided, otherwise go to broker
-        navigate(data.redirect || '/broker')
+        // Server-rendered pages (e.g. the multi-tenant admin panel) are not React
+        // routes — they must be reached with a full page load, not client routing.
+        if (data.redirect && data.redirect.startsWith('/admin/')) {
+          window.location.href = data.redirect
+        } else {
+          // Use redirect from response if provided, otherwise land on the
+          // dashboard (shell + connect-broker prompt when no broker yet).
+          navigate(data.redirect || '/dashboard')
+        }
       }
     } catch (_err) {
       setError('Login failed. Please try again.')
@@ -191,7 +201,11 @@ export default function Login() {
 
       setLogin(username, data.broker || '')
       showToast.success('Login successful', 'system')
-      navigate(data.redirect || '/broker')
+      if (data.redirect && data.redirect.startsWith('/admin/')) {
+        window.location.href = data.redirect
+      } else {
+        navigate(data.redirect || '/dashboard')
+      }
     } catch (_err) {
       setError('Failed to verify TOTP. Please try again.')
     } finally {
@@ -302,6 +316,15 @@ export default function Login() {
                       </>
                     )}
                   </Button>
+
+                  {multiTenant && (
+                    <div className="text-center pt-2">
+                      <span className="text-sm text-muted-foreground">Don't have an account? </span>
+                      <Link to="/register" className="text-sm text-primary hover:underline">
+                        Register
+                      </Link>
+                    </div>
+                  )}
                 </form>
               ) : (
                 <form onSubmit={handleTotpSubmit} className="space-y-4">

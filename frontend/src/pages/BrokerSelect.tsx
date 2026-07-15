@@ -1,5 +1,7 @@
-import { BookOpen, ExternalLink, Info, Loader2 } from 'lucide-react'
+import { BookOpen, ExternalLink, Info, Loader2, LogOut } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { authApi } from '@/api/auth'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -76,17 +78,39 @@ function generateRandomState(): string {
 }
 
 export default function BrokerSelect() {
-  const { user } = useAuthStore()
+  const { user, logout } = useAuthStore()
+  const navigate = useNavigate()
   const [selectedBroker, setSelectedBroker] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [brokerConfig, setBrokerConfig] = useState<BrokerConfig | null>(null)
+  // Multi-tenant: each user has their own set of configured brokers.
+  const [multiTenant, setMultiTenant] = useState(false)
+  const [mtBrokers, setMtBrokers] = useState<BrokerConfig[]>([])
 
   useEffect(() => {
     // Fetch broker configuration
     const fetchBrokerConfig = async () => {
       try {
+        // Multi-tenant first: the per-user endpoint returns the brokers this
+        // user has configured. A 404 means single-tenant mode — fall back.
+        const mtResp = await fetch('/mt/broker-config', { credentials: 'include' })
+        if (mtResp.ok) {
+          const mtData = await mtResp.json()
+          if (mtData.status === 'success' && mtData.multi_tenant) {
+            setMultiTenant(true)
+            setMtBrokers(mtData.brokers || [])
+            if (mtData.brokers && mtData.brokers.length > 0) {
+              setBrokerConfig(mtData.brokers[0])
+              setSelectedBroker(mtData.brokers[0].broker_name)
+            }
+            setIsLoading(false)
+            return
+          }
+        }
+
+        // Single-tenant mode
         const response = await fetch('/auth/broker-config', {
           credentials: 'include',
         })
@@ -108,6 +132,26 @@ export default function BrokerSelect() {
 
     fetchBrokerConfig()
   }, [])
+
+  // Multi-tenant: when the user picks a different broker, swap the active
+  // config (api key + redirect url) to that broker's stored credentials.
+  const handleBrokerChange = (value: string) => {
+    setSelectedBroker(value)
+    if (multiTenant) {
+      const cfg = mtBrokers.find((b) => b.broker_name === value)
+      if (cfg) setBrokerConfig(cfg)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await authApi.logout()
+    } catch {
+      // ignore — clear client state regardless
+    }
+    logout()
+    navigate('/login', { replace: true })
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -220,14 +264,14 @@ export default function BrokerSelect() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-[60vh] flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-8 px-4">
+    <div className="min-h-[70vh] flex items-center justify-center py-4">
       <div className="container max-w-6xl">
         <div className="flex flex-col lg:flex-row items-center justify-between gap-8 lg:gap-16">
           {/* Right side broker form - Shown first on mobile */}
@@ -248,6 +292,20 @@ export default function BrokerSelect() {
                 </Alert>
               )}
 
+              {multiTenant && mtBrokers.length === 0 ? (
+                <div className="space-y-4 text-center">
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                      You haven't added any broker credentials yet. Add your broker's
+                      API key and secret to get started.
+                    </AlertDescription>
+                  </Alert>
+                  <Button asChild className="w-full">
+                    <Link to="/broker-credentials">Add Broker Credentials</Link>
+                  </Button>
+                </div>
+              ) : (
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="space-y-2">
                   <Label htmlFor="broker-select" className="block text-center">
@@ -255,20 +313,29 @@ export default function BrokerSelect() {
                   </Label>
                   <Select
                     value={selectedBroker}
-                    onValueChange={setSelectedBroker}
+                    onValueChange={handleBrokerChange}
                     disabled={isSubmitting}
                   >
                     <SelectTrigger id="broker-select" className="w-full">
                       <SelectValue placeholder="Select a Broker" />
                     </SelectTrigger>
                     <SelectContent>
-                      {allBrokers
-                        .filter((broker) => broker.id === brokerConfig?.broker_name)
-                        .map((broker) => (
-                          <SelectItem key={broker.id} value={broker.id}>
-                            {broker.name}
-                          </SelectItem>
-                        ))}
+                      {multiTenant
+                        ? mtBrokers.map((cfg) => {
+                            const meta = allBrokers.find((b) => b.id === cfg.broker_name)
+                            return (
+                              <SelectItem key={cfg.broker_name} value={cfg.broker_name}>
+                                {meta?.name || cfg.broker_name}
+                              </SelectItem>
+                            )
+                          })
+                        : allBrokers
+                            .filter((broker) => broker.id === brokerConfig?.broker_name)
+                            .map((broker) => (
+                              <SelectItem key={broker.id} value={broker.id}>
+                                {broker.name}
+                              </SelectItem>
+                            ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -298,6 +365,24 @@ export default function BrokerSelect() {
                   )}
                 </Button>
               </form>
+              )}
+              {multiTenant && (
+                <p className="mt-4 text-center text-sm text-muted-foreground">
+                  <Link to="/broker-credentials" className="text-primary hover:underline">
+                    Manage broker credentials
+                  </Link>
+                </p>
+              )}
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full mt-4"
+                onClick={handleLogout}
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </Button>
             </CardContent>
           </Card>
 

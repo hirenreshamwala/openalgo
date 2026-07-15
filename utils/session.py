@@ -214,11 +214,6 @@ def check_session_validity(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not is_session_valid():
-            # Revoke tokens before clearing session
-            revoke_user_tokens()
-            session.clear()
-
-            # Check if this is an AJAX/fetch request
             from flask import jsonify, request
 
             is_ajax = (
@@ -227,6 +222,28 @@ def check_session_validity(f):
                 or request.content_type == "application/json"
                 or request.is_json
             )
+
+            # A user who is logged in (has an app session) but has NOT connected
+            # a broker has session["user"] set without the "logged_in" flag.
+            # That is a valid app session, not an expired one — do NOT revoke
+            # tokens or clear the session here, or every broker-gated endpoint a
+            # no-broker user touches (e.g. global market-status polling) would
+            # silently destroy their session and log them out. Just refuse this
+            # broker-required endpoint; the app shell stays usable.
+            if session.get("user") and not session.get("logged_in"):
+                if is_ajax:
+                    return jsonify(
+                        {
+                            "status": "error",
+                            "error": "broker_required",
+                            "message": "Connect a broker to use this feature.",
+                        }
+                    ), 401
+                return redirect("/dashboard")
+
+            # Genuine expiry / no session at all: revoke tokens and clear.
+            revoke_user_tokens()
+            session.clear()
 
             if is_ajax:
                 # Return JSON response for AJAX requests instead of redirect
@@ -243,6 +260,32 @@ def check_session_validity(f):
             logger.info("Invalid session detected - redirecting to login")
             return redirect(url_for("auth.login"))
         logger.debug("Session validated successfully")
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def require_user_session(f):
+    """Lighter session guard: only requires password login (session['user'] set).
+
+    Used for admin-only pages that must be accessible before broker OAuth
+    completes (e.g. multi-tenant user management).  Full broker session
+    (session['logged_in']) is NOT required.
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        from flask import jsonify, request
+
+        if not session.get("user"):
+            is_ajax = (
+                request.headers.get("X-Requested-With") == "XMLHttpRequest"
+                or request.headers.get("Accept", "").startswith("application/json")
+                or request.is_json
+            )
+            if is_ajax:
+                return jsonify({"status": "error", "message": "Not authenticated"}), 401
+            return redirect(url_for("auth.login"))
         return f(*args, **kwargs)
 
     return decorated_function

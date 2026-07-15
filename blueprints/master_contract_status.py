@@ -9,7 +9,7 @@ from utils.auth_utils import (
     should_download_master_contract,
 )
 from utils.logging import get_logger
-from utils.session import check_session_validity
+from utils.session import check_session_validity, require_user_session
 
 logger = get_logger(__name__)
 
@@ -17,13 +17,18 @@ master_contract_status_bp = Blueprint("master_contract_status_bp", __name__, url
 
 
 @master_contract_status_bp.route("/master-contract/status", methods=["GET"])
-@check_session_validity
+@require_user_session
 def get_master_contract_status():
     """Get the current master contract download status"""
     try:
         broker = session.get("broker")
         if not broker:
-            return jsonify({"status": "error", "message": "No broker session found"}), 401
+            # Logged in without a broker: there is no master contract yet. Return
+            # a neutral 200 (not 401) so the dashboard shows a pending state
+            # instead of spamming the console with unauthorized errors.
+            return jsonify(
+                {"status": "pending", "message": "No broker connected", "is_ready": False}
+            ), 200
 
         status_data = get_status(broker)
         return jsonify(status_data), 200

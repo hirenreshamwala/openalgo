@@ -56,6 +56,7 @@ from blueprints.broker_credentials import (
     broker_credentials_bp,  # Import the broker credentials blueprint
 )
 from blueprints.chartink import chartink_bp  # Import the chartink blueprint
+from blueprints.mt_settings import mt_settings_bp  # Multi-tenant per-user settings
 from blueprints.chart_test import chart_test_bp  # Standalone chart test page (dev/testing only)
 from blueprints.strategy_portfolio import strategy_portfolio_bp  # Strategy Builder portfolio
 from blueprints.core import core_bp
@@ -326,6 +327,7 @@ def create_app():
     app.register_blueprint(broker_credentials_bp)  # Register Broker credentials blueprint
     app.register_blueprint(system_permissions_bp)  # Register System permissions blueprint
     app.register_blueprint(strategy_portfolio_bp)  # Register Strategy Portfolio blueprint
+    app.register_blueprint(mt_settings_bp)  # Multi-tenant per-user broker settings
 
     # Remote MCP (HTTP + OAuth) — opt-in via MCP_HTTP_ENABLED. Off by default.
     # Pre-flight refusal: must NEVER coexist with FLASK_DEBUG=True (debug-mode
@@ -673,6 +675,17 @@ def setup_environment(app):
                 ("Leverage DB", ensure_leverage_tables_exists),
                 ("Strategy Portfolio DB", ensure_strategy_portfolio_tables_exists),
             ]
+
+            # Multi-tenant-only tables (per-user broker credentials + parent/child
+            # symbols). Created here so a fresh deploy self-provisions them via
+            # create_all, consistent with every other table; Alembic remains the
+            # path for upgrading a pre-existing single-tenant database.
+            if os.getenv("MULTI_TENANT", "false").lower() == "true":
+                from database.broker_creds_db import init_db as ensure_broker_creds_tables_exists
+                from database.symbols_db import init_db as ensure_mt_symbols_tables_exists
+
+                db_init_functions.append(("Broker Creds DB", ensure_broker_creds_tables_exists))
+                db_init_functions.append(("MT Symbols DB", ensure_mt_symbols_tables_exists))
 
             db_init_start = time.time()
             with ThreadPoolExecutor(max_workers=15) as executor:
@@ -1051,4 +1064,4 @@ if __name__ == "__main__":
             f"{C}{BL}{H*(_W-2)}{BR}{R}", "",
         ]), flush=True)
 
-    socketio.run(app, host=host_ip, port=port, debug=debug, reloader_options=reloader_options)
+    socketio.run(app, host=host_ip, port=port, debug=debug, reloader_options=reloader_options, allow_unsafe_werkzeug=True)

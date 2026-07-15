@@ -1,4 +1,5 @@
 import os
+from utils.broker_context import get_broker_credential
 
 from broker.rmoney.baseurl import HOSTLOOKUP_URL, INTERACTIVE_URL, MARKET_DATA_URL
 from utils.httpx_client import get_httpx_client
@@ -57,8 +58,8 @@ def authenticate_broker(request_token):
 
 def get_feed_token():
     try:
-        BROKER_API_KEY_MARKET = os.getenv("BROKER_API_KEY_MARKET")
-        BROKER_API_SECRET_MARKET = os.getenv("BROKER_API_SECRET_MARKET")
+        BROKER_API_KEY_MARKET = get_broker_credential("BROKER_API_KEY_MARKET")
+        BROKER_API_SECRET_MARKET = get_broker_credential("BROKER_API_SECRET_MARKET")
 
         feed_payload = {
             "secretKey": BROKER_API_SECRET_MARKET,

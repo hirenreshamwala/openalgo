@@ -15,7 +15,7 @@ from services.place_smart_order_service import place_smart_order
 from services.positionbook_service import get_positionbook
 from services.tradebook_service import get_tradebook
 from utils.logging import get_logger
-from utils.session import check_session_validity
+from utils.session import check_session_validity, require_user_session
 
 logger = get_logger(__name__)
 
@@ -1084,7 +1084,7 @@ def delete_pending_order_route(order_id):
 
 
 @orders_bp.route("/action-center/count")
-@check_session_validity
+@require_user_session
 def action_center_count():
     """Get count of pending orders for badge"""
     login_username = session["user"]
@@ -1165,7 +1165,7 @@ def approve_all_pending_orders():
 
 
 @orders_bp.route("/action-center/api/data")
-@check_session_validity
+@require_user_session
 @limiter.limit(API_RATE_LIMIT)
 def action_center_api_data():
     """

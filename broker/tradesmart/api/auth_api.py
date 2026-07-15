@@ -14,6 +14,7 @@ TradeSmart v2 docs (Quick start step 4) — this differs from flattrade's
 import hashlib
 import json
 import os
+from utils.broker_context import get_broker_credential
 
 from broker.tradesmart.api.baseurl import GENACSTOK_URL, get_api_key
 from utils.httpx_client import get_httpx_client
@@ -39,7 +40,7 @@ def authenticate_broker(code, password=None, totp_code=None):
     """
     try:
         api_key = get_api_key()
-        secret_key = os.getenv("BROKER_API_SECRET")
+        secret_key = get_broker_credential("BROKER_API_SECRET")
 
         if not api_key or not secret_key:
             return None, "BROKER_API_KEY / BROKER_API_SECRET not configured"

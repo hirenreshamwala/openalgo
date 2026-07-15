@@ -25,9 +25,15 @@ from database.qty_freeze_db import (
     load_freeze_qty_from_csv,
 )
 from database.qty_freeze_db import db_session as freeze_db_session
+from database.user_db import (
+    approve_user,
+    get_all_users,
+    get_pending_users,
+    reject_user,
+)
 from limiter import limiter
 from utils.logging import get_logger
-from utils.session import check_session_validity
+from utils.session import check_session_validity, require_user_session
 
 logger = get_logger(__name__)
 
@@ -309,7 +315,7 @@ def api_freeze_upload():
 
 
 @admin_bp.route("/api/holidays")
-@check_session_validity
+@require_user_session
 @limiter.limit(API_RATE_LIMIT)
 def api_holidays_list():
     """Get holidays for a specific year"""
@@ -473,7 +479,7 @@ def api_holiday_delete(id):
 
 
 @admin_bp.route("/api/timings")
-@check_session_validity
+@require_user_session
 @limiter.limit(API_RATE_LIMIT)
 def api_timings_list():
     """Get all market timings"""
@@ -2395,3 +2401,232 @@ def api_mcp_settings_put():
             "settings_pending": _mcp_settings_payload(),  # what's in .env now
         }
     )
+
+
+# ============================================================================
+# User Management Endpoints (Multi-Tenant Only)
+# ============================================================================
+
+
+@admin_bp.route("/users", methods=["GET"])
+@require_user_session
+@limiter.limit(API_RATE_LIMIT)
+def list_users():
+    """List all users. Admin only. Multi-tenant only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    from flask import session as flask_session
+    from database.user_db import find_user_by_exact_username
+
+    me = find_user_by_exact_username(flask_session.get("user", ""))
+    if not me or me.role != "admin":
+        return jsonify(status="error", message="Forbidden: admin only"), 403
+    users = get_all_users()
+    return jsonify(
+        status="success",
+        users=[
+            {"username": u.username, "email": u.email, "status": u.status, "role": u.role}
+            for u in users
+        ],
+    )
+
+
+@admin_bp.route("/users/<username>/approve", methods=["POST"])
+@require_user_session
+@limiter.limit(API_RATE_LIMIT)
+def approve_user_route(username):
+    """Approve a pending user. Admin only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    if not approve_user(username):
+        return jsonify(status="error", message="User not found"), 404
+    logger.info(f"Admin approved user: {username}")
+    return jsonify(status="success", message=f"User {username} approved")
+
+
+@admin_bp.route("/users/<username>/reject", methods=["POST"])
+@require_user_session
+@limiter.limit(API_RATE_LIMIT)
+def reject_user_route(username):
+    """Reject a user. Admin only."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    if not reject_user(username):
+        return jsonify(status="error", message="User not found"), 404
+    logger.info(f"Admin rejected user: {username}")
+    return jsonify(status="success", message=f"User {username} rejected")
+
+
+# ============================================================================
+# Aggregate endpoints — fan-out to all approved users (MULTI_TENANT only)
+# ============================================================================
+
+import concurrent.futures
+
+
+def _require_admin():
+    """Return None if the current session user is an approved admin, else a
+    (response, status) tuple to short-circuit the view."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Not available"), 404
+    from flask import session as flask_session
+    from database.user_db import find_user_by_exact_username
+
+    u = find_user_by_exact_username(flask_session.get("user", ""))
+    if not u or u.role != "admin":
+        return jsonify(status="error", message="Forbidden: admin only"), 403
+    return None
+
+
+def _get_approved_users_auth() -> list[tuple[str, str, str]]:
+    """Return (username, auth_token, broker) for all approved users with an active auth record."""
+    from database.auth_db import Auth, get_auth_token
+
+    users = get_all_users()
+    result = []
+    for user in users:
+        if user.status != "approved":
+            continue
+        auth_row = Auth.query.filter_by(name=user.username).filter_by(is_revoked=False).first()
+        if auth_row is None:
+            continue
+        token = get_auth_token(user.username)
+        if token:
+            result.append((user.username, token, auth_row.broker))
+    return result
+
+
+def _normalize_result(raw) -> tuple[object, str | None]:
+    """Turn a service (success, response_dict, http_status) tuple into
+    (payload, error). payload is the inner `data` on success, else None."""
+    try:
+        success, resp, _code = raw
+    except (TypeError, ValueError):
+        return None, "Malformed broker response"
+    if success and isinstance(resp, dict) and resp.get("status") == "success":
+        return resp.get("data"), None
+    err = resp.get("message") if isinstance(resp, dict) else "Unknown error"
+    return None, err or "Unknown error"
+
+
+def _fetch_user_data(fetch_fn, users_auth: list[tuple[str, str, str]]) -> list[dict]:
+    """Fan out fetch_fn(auth_token, broker) to all users concurrently.
+
+    Returns list of {username, broker, payload, error} dicts (payload = inner data).
+    """
+    broker_by_user = {u: b for u, _t, b in users_auth}
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {
+            pool.submit(fetch_fn, auth_token, broker): username
+            for username, auth_token, broker in users_auth
+        }
+        for future in concurrent.futures.as_completed(futures, timeout=20):
+            username = futures[future]
+            row = {"username": username, "broker": broker_by_user.get(username)}
+            try:
+                payload, error = _normalize_result(future.result())
+                row["payload"] = payload
+                row["error"] = error
+            except Exception as e:
+                logger.exception(f"Error fetching data for user {username}: {e}")
+                row["payload"] = None
+                row["error"] = str(e)
+            results.append(row)
+    results.sort(key=lambda r: r["username"])
+    return results
+
+
+def _to_float(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@admin_bp.route("/aggregate/orders", methods=["GET"])
+@require_user_session
+@limiter.limit(API_RATE_LIMIT)
+def aggregate_orders():
+    """Aggregate orders across all approved users. Admin only."""
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    from services.orderbook_service import get_orderbook_with_auth
+
+    users_auth = _get_approved_users_auth()
+    rows = _fetch_user_data(get_orderbook_with_auth, users_auth)
+
+    users = []
+    total_orders = 0
+    for r in rows:
+        payload = r.get("payload") or {}
+        orders = payload.get("orders", []) if isinstance(payload, dict) else []
+        stats = payload.get("statistics", {}) if isinstance(payload, dict) else {}
+        total_orders += len(orders)
+        users.append({
+            "username": r["username"], "broker": r.get("broker"),
+            "error": r.get("error"), "orders": orders, "statistics": stats,
+        })
+    return jsonify(status="success", users=users, totals={"order_count": total_orders})
+
+
+@admin_bp.route("/aggregate/positions", methods=["GET"])
+@require_user_session
+@limiter.limit(API_RATE_LIMIT)
+def aggregate_positions():
+    """Aggregate positions across all approved users. Admin only."""
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    from services.positionbook_service import get_positionbook_with_auth
+
+    users_auth = _get_approved_users_auth()
+    rows = _fetch_user_data(get_positionbook_with_auth, users_auth)
+
+    users = []
+    total_positions = 0
+    total_pnl = 0.0
+    for r in rows:
+        payload = r.get("payload")
+        positions = payload if isinstance(payload, list) else []
+        total_positions += len(positions)
+        for p in positions:
+            total_pnl += _to_float(p.get("pnl") or p.get("m2m") or 0)
+        users.append({
+            "username": r["username"], "broker": r.get("broker"),
+            "error": r.get("error"), "positions": positions,
+        })
+    return jsonify(
+        status="success", users=users,
+        totals={"position_count": total_positions, "total_pnl": round(total_pnl, 2)},
+    )
+
+
+@admin_bp.route("/aggregate/funds", methods=["GET"])
+@require_user_session
+@limiter.limit(API_RATE_LIMIT)
+def aggregate_funds():
+    """Aggregate funds across all approved users. Admin only."""
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    from services.funds_service import get_funds_with_auth
+
+    users_auth = _get_approved_users_auth()
+    rows = _fetch_user_data(get_funds_with_auth, users_auth)
+
+    # Sum the standard OpenAlgo funds fields across users.
+    sum_fields = ["availablecash", "collateral", "m2mrealized", "m2munrealized", "utiliseddebits"]
+    totals = dict.fromkeys(sum_fields, 0.0)
+    users = []
+    for r in rows:
+        funds = r.get("payload") if isinstance(r.get("payload"), dict) else {}
+        for f in sum_fields:
+            totals[f] += _to_float(funds.get(f))
+        users.append({
+            "username": r["username"], "broker": r.get("broker"),
+            "error": r.get("error"), "funds": funds,
+        })
+    totals = {k: round(v, 2) for k, v in totals.items()}
+    return jsonify(status="success", users=users, totals=totals)

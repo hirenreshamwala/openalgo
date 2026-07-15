@@ -889,7 +889,11 @@ def broker_callback(broker, para=None):
         session["broker"] = broker
         logger.info(f"Successfully connected broker: {broker}")
         if broker == "zerodha":
-            auth_token = f"{BROKER_API_KEY}:{auth_token}"
+            # Resolve the API key per-request (multi-tenant: the logged-in user's
+            # key from context; single-tenant: env). The module-level
+            # BROKER_API_KEY is import-time only and would be the placeholder.
+            zerodha_api_key = get_broker_api_key()
+            auth_token = f"{zerodha_api_key}:{auth_token}"
         if broker == "dhan":
             auth_token = f"{auth_token}"
 

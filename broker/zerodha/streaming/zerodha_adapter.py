@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from utils.broker_context import get_broker_credential
 from database.auth_db import get_auth_token
 from database.token_db import get_token
 from websocket_proxy.base_adapter import BaseBrokerWebSocketAdapter
@@ -80,7 +81,7 @@ class ZerodhaWebSocketAdapter(BaseBrokerWebSocketAdapter):
             self.user_id = user_id
 
             # Get API key from environment
-            self.api_key = os.getenv("BROKER_API_KEY")
+            self.api_key = get_broker_credential("BROKER_API_KEY")
             if not self.api_key:
                 return {"status": "error", "message": "API key not found in environment variables"}
 

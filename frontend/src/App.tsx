@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Providers } from '@/app/providers'
 import { AuthSync } from '@/components/auth/AuthSync'
+import { AdminLayout } from '@/components/layout/AdminLayout'
 import { FullWidthLayout } from '@/components/layout/FullWidthLayout'
 import { Layout } from '@/components/layout/Layout'
 import { PageLoader } from '@/components/ui/page-loader'
@@ -14,6 +15,7 @@ const Home = lazy(() => import('@/pages/Home'))
 const Faq = lazy(() => import('@/pages/Faq'))
 const Setup = lazy(() => import('@/pages/Setup'))
 const Login = lazy(() => import('@/pages/Login'))
+const Register = lazy(() => import('@/pages/Register'))
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'))
 const Download = lazy(() => import('@/pages/Download'))
 const ServerError = lazy(() => import('@/pages/ServerError'))
@@ -22,6 +24,7 @@ const NotFound = lazy(() => import('@/pages/NotFound'))
 
 // Broker auth
 const BrokerSelect = lazy(() => import('@/pages/BrokerSelect'))
+const BrokerCredentials = lazy(() => import('@/pages/BrokerCredentials'))
 const BrokerTOTP = lazy(() => import('@/pages/BrokerTOTP'))
 const SamcoAuth = lazy(() => import('@/pages/SamcoAuth'))
 
@@ -121,6 +124,9 @@ function HoldingsRoute() {
 
 // Admin pages
 const AdminIndex = lazy(() => import('@/pages/admin/AdminIndex'))
+// Multi-tenant admin pages (no broker session required)
+const AdminUsers = lazy(() => import('@/pages/admin/AdminUsers'))
+const AdminAggregate = lazy(() => import('@/pages/admin/AdminAggregate'))
 const FreezeQty = lazy(() => import('@/pages/admin/FreezeQty'))
 const Holidays = lazy(() => import('@/pages/admin/Holidays'))
 const MarketTimings = lazy(() => import('@/pages/admin/MarketTimings'))
@@ -162,21 +168,35 @@ function App() {
               <Route path="/faq" element={<Faq />} />
               <Route path="/setup" element={<Setup />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/download" element={<Download />} />
               <Route path="/error" element={<ServerError />} />
               <Route path="/rate-limited" element={<RateLimited />} />
 
               {/* Broker auth routes */}
-              <Route path="/broker" element={<BrokerSelect />} />
               <Route path="/broker/:broker/totp" element={<BrokerTOTP />} />
               <Route path="/broker/samco/auth" element={<SamcoAuth />} />
               {/* Dynamic broker TOTP routes for all supported brokers */}
               <Route path="/:broker/auth" element={<BrokerTOTP />} />
 
+              {/* Multi-tenant admin area - requires admin role, NO broker session */}
+              <Route element={<AdminLayout />}>
+                <Route path="/admin/mt/users" element={<AdminUsers />} />
+                <Route path="/admin/mt/funds" element={<AdminAggregate type="funds" />} />
+                <Route
+                  path="/admin/mt/positions"
+                  element={<AdminAggregate type="positions" />}
+                />
+                <Route path="/admin/mt/orders" element={<AdminAggregate type="orders" />} />
+              </Route>
+
               {/* Protected routes - requires broker auth */}
               <Route element={<Layout />}>
                 <Route path="/dashboard" element={<Dashboard />} />
+                {/* Broker connect + credentials live inside the app shell */}
+                <Route path="/broker" element={<BrokerSelect />} />
+                <Route path="/broker-credentials" element={<BrokerCredentials />} />
                 <Route path="/positions" element={<Positions />} />
                 <Route path="/orderbook" element={<OrderBook />} />
                 <Route path="/tradebook" element={<TradeBook />} />

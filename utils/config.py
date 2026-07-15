@@ -12,20 +12,30 @@ def get_broker_api_key() -> str | None:
     """
     Retrieve the configured broker API key.
 
+    In multi-tenant mode this resolves the logged-in user's per-broker key from
+    the request context; in single-tenant mode it falls back to the env var.
+
     Returns:
-        str | None: The broker API key from environment variables, or None if not set.
+        str | None: The broker API key, or None if not set.
     """
-    return os.getenv("BROKER_API_KEY")
+    from utils.broker_context import get_broker_credential
+
+    return get_broker_credential("BROKER_API_KEY")
 
 
 def get_broker_api_secret() -> str | None:
     """
     Retrieve the configured broker API secret.
 
+    In multi-tenant mode this resolves the logged-in user's per-broker secret
+    from the request context; in single-tenant mode it falls back to the env var.
+
     Returns:
-        str | None: The broker API secret from environment variables, or None if not set.
+        str | None: The broker API secret, or None if not set.
     """
-    return os.getenv("BROKER_API_SECRET")
+    from utils.broker_context import get_broker_credential
+
+    return get_broker_credential("BROKER_API_SECRET")
 
 
 def get_login_rate_limit_min() -> str:

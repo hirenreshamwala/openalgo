@@ -1,4 +1,5 @@
 import os
+from utils.broker_context import get_broker_credential
 
 import httpx
 
@@ -22,8 +23,8 @@ def _get_app_credentials():
     1) api_key
     2) client_id:::api_key
     """
-    broker_api_key = os.getenv("BROKER_API_KEY")
-    broker_api_secret = os.getenv("BROKER_API_SECRET")
+    broker_api_key = get_broker_credential("BROKER_API_KEY")
+    broker_api_secret = get_broker_credential("BROKER_API_SECRET")
     dhan_client_id = None
 
     if broker_api_key and ":::" in broker_api_key:
@@ -428,7 +429,7 @@ def authenticate_broker(code):
     - If tokenId is passed, attempt consume-consent flow.
     """
     try:
-        env_access_token = os.getenv("BROKER_API_SECRET")
+        env_access_token = get_broker_credential("BROKER_API_SECRET")
 
         # Current dhan_sandbox callback flow in brlogin.py passes this value.
         if not code or code == "dhan_sandbox":

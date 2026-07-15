@@ -1,4 +1,5 @@
 import os
+from utils.broker_context import get_broker_credential
 
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
@@ -25,8 +26,8 @@ def authenticate_broker(request_token):
             - error_message: Error details if authentication fails, None on success
     """
     try:
-        BROKER_API_KEY = os.getenv("BROKER_API_KEY")
-        BROKER_API_SECRET = os.getenv("BROKER_API_SECRET")
+        BROKER_API_KEY = get_broker_credential("BROKER_API_KEY")
+        BROKER_API_SECRET = get_broker_credential("BROKER_API_SECRET")
 
         url = "https://developer.paytmmoney.com/accounts/v2/gettoken"
         data = {

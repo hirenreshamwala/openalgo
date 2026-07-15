@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from utils.broker_context import get_broker_credential
 
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
@@ -39,8 +40,8 @@ def authenticate_broker(userid, password, totp_code):
             - On failure: (None, error_message_string)
     """
     # Get the Firstock API credentials from environment variables
-    api_key = os.getenv("BROKER_API_SECRET")  # This should be the apiKey
-    vendor_code = os.getenv("BROKER_API_KEY")  # This should be the vendorCode
+    api_key = get_broker_credential("BROKER_API_SECRET")  # This should be the apiKey
+    vendor_code = get_broker_credential("BROKER_API_KEY")  # This should be the vendorCode
 
     # Validate required environment variables
     if not api_key:

@@ -19,11 +19,17 @@ from database.auth_db import auth_cache, feed_token_cache, upsert_auth
 from database.settings_db import get_smtp_settings, set_smtp_settings
 from database.user_db import (  # Import the function
     User,
+    add_user,
+    approve_user,
     authenticate_user,
+    check_mt_login_allowed,
     db_session,
     find_user_by_email,
     find_user_by_exact_username,
     find_user_by_username,
+    get_all_users,
+    get_pending_users,
+    reject_user,
 )
 from extensions import socketio
 from limiter import limiter  # Import the limiter instance
@@ -42,6 +48,56 @@ LOGIN_RATE_LIMIT_HOUR = os.getenv("LOGIN_RATE_LIMIT_HOUR", "25 per hour")
 RESET_RATE_LIMIT = os.getenv("RESET_RATE_LIMIT", "15 per hour")  # Password reset rate limit
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
+
+
+@auth_bp.before_app_request
+def _load_broker_credentials_into_context():
+    """In multi-tenant mode, load the logged-in user's broker credentials into context.
+
+    The broker is read from the user's Auth row (each user may use a different
+    broker), not from a global env var.
+    """
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return
+    username = session.get("user")
+    if not username:
+        return
+    try:
+        from database.auth_db import Auth
+        from database.broker_creds_db import get_broker_credentials
+        from utils.broker_context import set_broker_credentials
+
+        # Which broker's credentials to load:
+        #  1. During a broker connect flow the URL carries the broker
+        #     (e.g. /fyers/callback, /fyers/auth) — use that, because the user
+        #     has no Auth row yet on a first connect. Without this the broker's
+        #     authenticate_broker() would read the placeholder env credentials
+        #     and the OAuth callback would silently fail.
+        #  2. Otherwise use the user's already-connected broker (Auth.broker).
+        broker = None
+        if request.view_args and request.view_args.get("broker"):
+            broker = request.view_args["broker"]
+        if not broker:
+            auth_row = Auth.query.filter_by(name=username).first()
+            broker = auth_row.broker if auth_row else None
+        if not broker:
+            return
+        app_url = os.getenv("HOST_SERVER", "http://127.0.0.1:5000").rstrip("/")
+        creds = get_broker_credentials(username, broker)
+        if creds:
+            ctx = {
+                "BROKER_API_KEY": creds["api_key"],
+                "BROKER_API_SECRET": creds["api_secret"],
+                "REDIRECT_URL": f"{app_url}/{broker}/callback",
+                **(creds.get("extras") or {}),
+            }
+            # Route this user's broker calls through their own egress proxy so the
+            # traffic exits from their registered static IP (SEBI static-IP mandate).
+            if creds.get("proxy_url"):
+                ctx["HTTP_PROXY"] = creds["proxy_url"]
+            set_broker_credentials(ctx)
+    except Exception:
+        pass  # Never block a request due to credential loading failure
 
 
 def _utcnow_iso() -> str:
@@ -74,6 +130,45 @@ def _pending_totp_is_fresh() -> bool:
 def _clear_pending_totp() -> None:
     session.pop("pending_totp_user", None)
     session.pop("pending_totp_started_at", None)
+
+
+def _check_mt_login_allowed(username: str) -> tuple:
+    """Return (True, '') if login is allowed, or (False, message) if blocked.
+
+    Only active when MULTI_TENANT=true. In single-tenant mode always returns
+    (True, '') so the upstream login flow is completely unaffected.
+    """
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return True, ""
+    return check_mt_login_allowed(username)
+
+
+@auth_bp.route("/register", methods=["POST"])
+def register():
+    """Self-service registration. Only active when MULTI_TENANT=true."""
+    if os.getenv("MULTI_TENANT", "false").lower() != "true":
+        return jsonify(status="error", message="Registration not available"), 404
+
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    email = (data.get("email") or "").strip()
+    password = data.get("password") or ""
+
+    if not username or not email or not password:
+        return jsonify(status="error", message="username, email, and password are required"), 400
+
+    from utils.auth_utils import validate_password_strength
+
+    is_valid, error_message = validate_password_strength(password)
+    if not is_valid:
+        return jsonify(status="error", message=error_message), 400
+
+    user = add_user(username, email, password, is_admin=False)
+    if user is None:
+        return jsonify(status="error", message="Username or email already exists"), 409
+
+    logger.info(f"New user {username} registered, status=pending")
+    return jsonify(status="success", message="Registration successful. Awaiting admin approval.")
 
 
 @auth_bp.errorhandler(429)
@@ -131,7 +226,8 @@ def get_broker_config():
 def check_setup_required():
     """Check if initial setup is required (no users exist)."""
     needs_setup = find_user_by_username() is None
-    return jsonify({"status": "success", "needs_setup": needs_setup})
+    multi_tenant = os.getenv("MULTI_TENANT", "false").lower() == "true"
+    return jsonify({"status": "success", "needs_setup": needs_setup, "multi_tenant": multi_tenant})
 
 
 def _broker_validation_failure_reason(funds_data):
@@ -295,6 +391,11 @@ def login():
         if authenticate_user(username, password):
             logger.info(f"[LOGIN] Password auth success for: {username}")
 
+            # Multi-tenant gate: block pending/rejected users before any session work
+            _mt_allowed, _mt_msg = _check_mt_login_allowed(username)
+            if not _mt_allowed:
+                return jsonify(status="error", message=_mt_msg), 403
+
             # If the user has 2FA enabled for login, defer setting session["user"]
             # until TOTP is verified. This is the gate that prevents an attacker
             # with only the password from progressing to broker login. We park
@@ -322,10 +423,14 @@ def login():
                                   login_type="resume", broker=session.get("broker"))
                 return resumed
 
-            # No valid broker session — redirect to broker login
+            # No valid broker session — redirect to broker login (or admin page for admins)
             logger.info("[LOGIN] No valid broker session, redirecting to /broker")
             from database.auth_db import log_login_attempt
             log_login_attempt(username, ip, ua, status="success", login_type="password")
+            if os.getenv("MULTI_TENANT", "false").lower() == "true":
+                u = find_user_by_exact_username(username)
+                if u and u.role == "admin":
+                    return jsonify({"status": "success", "redirect": "/admin/mt/users"}), 200
             return jsonify({"status": "success"}), 200
         else:
             from database.auth_db import log_login_attempt
@@ -424,6 +529,10 @@ def login_totp():
         return resumed
 
     log_login_attempt(pending_username, ip, ua, status="success", login_type="totp")
+    if os.getenv("MULTI_TENANT", "false").lower() == "true":
+        u = find_user_by_exact_username(pending_username)
+        if u and u.role == "admin":
+            return jsonify({"status": "success", "redirect": "/admin/mt/users"}), 200
     return jsonify({"status": "success"}), 200
 
 
@@ -927,6 +1036,16 @@ def get_session_status():
             {"status": "success", "message": "Not authenticated", "authenticated": False, "logged_in": False}
         ), 200
 
+    # Resolve the user's role (multi-tenant admin/user) so the SPA can render
+    # the admin area for admins even before a broker is connected.
+    user_role = "user"
+    try:
+        _u = find_user_by_exact_username(session.get("user"))
+        if _u is not None and getattr(_u, "role", None):
+            user_role = _u.role
+    except Exception:
+        pass
+
     # If session claims to be logged in with broker, validate the auth token exists
     if session.get("logged_in") and session.get("broker"):
         from database.auth_db import get_api_key_for_tradingview, get_auth_token
@@ -955,6 +1074,7 @@ def get_session_status():
                     "user": session.get("user"),
                     "broker": session.get("broker"),
                     "broker_session_expired": True,
+                    "role": user_role,
                 }
             ), 200
 
@@ -974,6 +1094,7 @@ def get_session_status():
                 "broker": session.get("broker"),
                 "api_key": api_key,
                 "active_sessions": active_count,
+                "role": user_role,
             }
         )
 
@@ -989,6 +1110,7 @@ def get_session_status():
             "user": session.get("user"),
             "broker": session.get("broker"),
             "active_sessions": active_count,
+            "role": user_role,
         }
     )
 
@@ -1188,52 +1310,58 @@ def get_dashboard_data():
 
 @auth_bp.route("/logout", methods=["GET", "POST"])
 def logout():
-    if session.get("logged_in"):
-        username = session["user"]
+    username = session.get("user")
+    if username:
+        # Broker-session teardown only applies when a broker was actually
+        # connected (session["logged_in"] is set only after broker OAuth).
+        # An admin or a user who hasn't connected a broker has session["user"]
+        # but NOT "logged_in" — we must still clear their app session below,
+        # otherwise logout appears to do nothing and bounces them back.
+        if session.get("logged_in"):
+            # Clear cache entries before database update to prevent stale data access
+            cache_key_auth = f"auth-{username}"
+            cache_key_feed = f"feed-{username}"
+            if cache_key_auth in auth_cache:
+                del auth_cache[cache_key_auth]
+                logger.info(f"Cleared auth cache for user: {username}")
+            if cache_key_feed in feed_token_cache:
+                del feed_token_cache[cache_key_feed]
+                logger.info(f"Cleared feed token cache for user: {username}")
 
-        # Clear cache entries before database update to prevent stale data access
-        cache_key_auth = f"auth-{username}"
-        cache_key_feed = f"feed-{username}"
-        if cache_key_auth in auth_cache:
-            del auth_cache[cache_key_auth]
-            logger.info(f"Cleared auth cache for user: {username}")
-        if cache_key_feed in feed_token_cache:
-            del feed_token_cache[cache_key_feed]
-            logger.info(f"Cleared feed token cache for user: {username}")
+            # Clear symbol cache on logout
+            try:
+                from database.master_contract_cache_hook import clear_cache_on_logout
 
-        # Clear symbol cache on logout
-        try:
-            from database.master_contract_cache_hook import clear_cache_on_logout
+                clear_cache_on_logout()
+                logger.info("Cleared symbol cache on logout")
+            except Exception as cache_error:
+                logger.exception(f"Error clearing symbol cache on logout: {cache_error}")
 
-            clear_cache_on_logout()
-            logger.info("Cleared symbol cache on logout")
-        except Exception as cache_error:
-            logger.exception(f"Error clearing symbol cache on logout: {cache_error}")
+            # writing to database
+            inserted_id = upsert_auth(username, "", "", revoke=True)
+            if inserted_id is not None:
+                logger.info(f"Database Upserted record with ID: {inserted_id}")
+                logger.info(f"Auth Revoked in the Database for user: {username}")
+            else:
+                logger.error(f"Failed to upsert auth token for user: {username}")
 
-        # writing to database
-        inserted_id = upsert_auth(username, "", "", revoke=True)
-        if inserted_id is not None:
-            logger.info(f"Database Upserted record with ID: {inserted_id}")
-            logger.info(f"Auth Revoked in the Database for user: {username}")
-        else:
-            logger.error(f"Failed to upsert auth token for user: {username}")
+            # Notify all connected devices to logout immediately
+            socketio.emit("force_logout", {
+                "message": "You have been logged out from another device.",
+            })
 
-        # Clear ALL sessions for this user (logout means all devices)
+            # Update session count to 0
+            socketio.emit("active_sessions_update", {
+                "count": 0,
+                "sessions": [],
+            })
+
+        # Clear ALL server-side sessions for this user (logout = all devices).
+        # Runs for every authenticated user, broker-connected or not.
         from database.auth_db import clear_user_sessions
         clear_user_sessions(username)
 
-        # Notify all connected devices to logout immediately
-        socketio.emit("force_logout", {
-            "message": "You have been logged out from another device.",
-        })
-
-        # Update session count to 0
-        socketio.emit("active_sessions_update", {
-            "count": 0,
-            "sessions": [],
-        })
-
-        # Clear entire session to ensure complete logout
+        # Clear entire Flask session to ensure complete logout
         session.clear()
         logger.info(f"Session cleared for user: {username}")
 

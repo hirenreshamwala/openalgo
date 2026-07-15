@@ -1,6 +1,26 @@
 import axios from 'axios'
+import { useAuthStore } from '@/stores/authStore'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
+
+// Decide what to do on a 401.
+//  - "broker_required": the user is logged in but has no broker connected and
+//    hit a broker-gated endpoint. This is NOT a logout — do nothing and let the
+//    caller handle the empty state (the app shell shows a "connect broker"
+//    banner). Redirecting here would bounce the user off every page that has a
+//    background broker-gated fetch.
+//  - anything else (genuine session expiry / no session): go to /login.
+function handleUnauthorized(error?: { response?: { data?: { error?: string } } }) {
+  if (error?.response?.data?.error === 'broker_required') {
+    return
+  }
+  const { isSessionActive, user } = useAuthStore.getState()
+  if (isSessionActive && !user?.broker) {
+    // No explicit code but clearly a no-broker session — treat as broker_required.
+    return
+  }
+  window.location.href = '/login'
+}
 
 // Helper to fetch CSRF token
 export async function fetchCSRFToken(): Promise<string> {
@@ -35,8 +55,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Handle unauthorized - redirect to login
-      window.location.href = '/login'
+      handleUnauthorized(error)
     }
     return Promise.reject(error)
   }
@@ -124,8 +143,7 @@ webClient.interceptors.response.use(
   (error) => {
     const status = error.response?.status
     if (status === 401) {
-      // Unauthorized - redirect to login
-      window.location.href = '/login'
+      handleUnauthorized(error)
     } else if (status === 403) {
       // Forbidden - user doesn't have permission for this resource
       // Create a more descriptive error for the caller to handle

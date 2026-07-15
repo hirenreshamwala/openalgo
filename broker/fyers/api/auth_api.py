@@ -3,6 +3,7 @@ import json
 import os
 from typing import Any, Dict, Optional, Tuple
 
+from utils.broker_context import get_broker_credential
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
 
@@ -24,11 +25,11 @@ def authenticate_broker(request_token: str) -> tuple[str | None, dict[str, Any] 
     # Initialize response data
     response_data = {"status": "error", "message": "Authentication failed", "data": None}
 
-    # Get environment variables
-    broker_api_key = os.getenv("BROKER_API_KEY")
-    broker_api_secret = os.getenv("BROKER_API_SECRET")
+    # Per-user credentials in multi-tenant mode (falls back to env in single-tenant)
+    broker_api_key = get_broker_credential("BROKER_API_KEY")
+    broker_api_secret = get_broker_credential("BROKER_API_SECRET")
 
-    # Validate environment variables
+    # Validate credentials
     if not broker_api_key or not broker_api_secret:
         error_msg = "Missing BROKER_API_KEY or BROKER_API_SECRET in environment variables"
         logger.error(error_msg)
