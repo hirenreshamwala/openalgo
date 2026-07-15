@@ -1,4 +1,5 @@
 import os
+from utils.broker_context import get_broker_credential
 
 from broker.deltaexchange.api.baseurl import BASE_URL, get_auth_headers, get_url
 from utils.httpx_client import get_httpx_client
@@ -24,8 +25,8 @@ def authenticate_broker(code):
         (None, error_message)   on failure
     """
     try:
-        api_key = os.getenv("BROKER_API_KEY", "").strip()
-        api_secret = os.getenv("BROKER_API_SECRET", "").strip()
+        api_key = (get_broker_credential("BROKER_API_KEY") or "").strip()
+        api_secret = (get_broker_credential("BROKER_API_SECRET") or "").strip()
 
         if not api_key:
             return None, "BROKER_API_KEY is not set in environment variables"

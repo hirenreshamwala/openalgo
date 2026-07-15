@@ -1,5 +1,6 @@
 import hashlib
 import os
+from utils.broker_context import get_broker_credential
 
 import httpx
 import requests
@@ -16,8 +17,8 @@ def authenticate_broker(request_token):
         # Get the shared httpx client
         client = get_httpx_client()
         # Fetching the necessary credentials from environment variables
-        BROKER_API_KEY = os.getenv("BROKER_API_KEY")
-        BROKER_API_SECRET = os.getenv("BROKER_API_SECRET")
+        BROKER_API_KEY = get_broker_credential("BROKER_API_KEY")
+        BROKER_API_SECRET = get_broker_credential("BROKER_API_SECRET")
 
         # Make POST request to get the final token
         payload = {
@@ -65,8 +66,8 @@ def authenticate_broker(request_token):
 def get_feed_token():
     try:
         # Fetch credentials for feed token
-        BROKER_API_KEY_MARKET = os.getenv("BROKER_API_KEY_MARKET")
-        BROKER_API_SECRET_MARKET = os.getenv("BROKER_API_SECRET_MARKET")
+        BROKER_API_KEY_MARKET = get_broker_credential("BROKER_API_KEY_MARKET")
+        BROKER_API_SECRET_MARKET = get_broker_credential("BROKER_API_SECRET_MARKET")
 
         # Construct payload for feed token request
         feed_payload = {

@@ -42,7 +42,7 @@ def authenticate_broker(auth_code: str, client_id: str):
         tuple: (auth_token, error_message)
     """
     try:
-        app_secret = os.getenv("BROKER_API_SECRET", "").strip()
+        app_secret = (get_broker_credential("BROKER_API_SECRET") or "").strip()
         if not app_secret:
             return None, "BROKER_API_SECRET not found in environment variables"
 

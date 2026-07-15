@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from utils.broker_context import get_broker_credential
 
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
@@ -14,9 +15,9 @@ def authenticate_broker(code):
     Exchanges the authorization code for an access token.
     """
     # BROKER_API_KEY format: userid:::client_id (e.g., Z56004:::Z56004_U)
-    full_api_key = os.getenv("BROKER_API_KEY")
+    full_api_key = get_broker_credential("BROKER_API_KEY")
     client_id = full_api_key.split(":::")[1]  # OAuth client_id
-    secret_key = os.getenv("BROKER_API_SECRET")
+    secret_key = get_broker_credential("BROKER_API_SECRET")
 
     try:
         # Get the shared httpx client

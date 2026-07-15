@@ -1,4 +1,5 @@
 import os
+from utils.broker_context import get_broker_credential
 
 from database.auth_db import samco_get_secret_key as get_secret_key
 from utils.httpx_client import get_httpx_client
@@ -27,12 +28,12 @@ def _parse_response(step, response):
 
 def get_client_id():
     """Get the client ID (User ID) from environment variables."""
-    return os.getenv("BROKER_API_KEY")
+    return get_broker_credential("BROKER_API_KEY")
 
 
 def get_password():
     """Get the password from environment variables."""
-    return os.getenv("BROKER_API_SECRET")
+    return get_broker_credential("BROKER_API_SECRET")
 
 
 def generate_otp(uid):

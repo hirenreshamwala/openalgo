@@ -1,5 +1,6 @@
 import json
 import os
+from utils.broker_context import get_broker_credential
 from urllib.parse import urlencode
 
 from utils.httpx_client import get_httpx_client
@@ -28,7 +29,7 @@ def authenticate_broker(password=None, twofa=None, twofa_type=None):
         # Force twofa_type to be totp
         twofa_type = "totp"
 
-        BROKER_API_SECRET = os.getenv("BROKER_API_SECRET")
+        BROKER_API_SECRET = get_broker_credential("BROKER_API_SECRET")
         if not BROKER_API_SECRET:
             return None, "BROKER_API_SECRET environment variable not set"
 
@@ -78,7 +79,7 @@ def get_auth_url():
     """
     Generate the authorization URL for Tradejini OAuth flow
     """
-    BROKER_API_SECRET = os.getenv("BROKER_API_SECRET")
+    BROKER_API_SECRET = get_broker_credential("BROKER_API_SECRET")
     REDIRECT_URI = os.getenv("REDIRECT_URI")
 
     params = {
@@ -94,8 +95,8 @@ def get_auth_url():
 
 def authenticate_broker_oauth(code):
     try:
-        BROKER_API_KEY = os.getenv("BROKER_API_KEY")
-        BROKER_API_SECRET = os.getenv("BROKER_API_SECRET")
+        BROKER_API_KEY = get_broker_credential("BROKER_API_KEY")
+        BROKER_API_SECRET = get_broker_credential("BROKER_API_SECRET")
 
         url = f"{BASE_URL}/api-gw/oauth/token"
         data = {

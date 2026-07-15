@@ -1,5 +1,6 @@
 import json
 import os
+from utils.broker_context import get_broker_credential
 
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
@@ -94,8 +95,8 @@ def authenticate_broker(totp_code):
                - error_message: Error message if authentication failed
     """
     # Get credentials from environment
-    phone = os.getenv("BROKER_API_KEY")  # Mobile number
-    mpin = os.getenv("BROKER_API_SECRET")  # MPIN
+    phone = get_broker_credential("BROKER_API_KEY")  # Mobile number
+    mpin = get_broker_credential("BROKER_API_SECRET")  # MPIN
 
     if not phone or not mpin:
         return (

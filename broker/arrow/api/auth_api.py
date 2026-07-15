@@ -14,6 +14,7 @@
 
 import hashlib
 import os
+from utils.broker_context import get_broker_credential
 
 from broker.arrow.api.baseurl import AUTH_TOKEN_URL
 from utils.httpx_client import get_httpx_client
@@ -32,8 +33,8 @@ def authenticate_broker(request_token):
         (auth_token, None) on success, (None, error_message) on failure.
     """
     try:
-        app_id = os.getenv("BROKER_API_KEY")
-        app_secret = os.getenv("BROKER_API_SECRET")
+        app_id = get_broker_credential("BROKER_API_KEY")
+        app_secret = get_broker_credential("BROKER_API_SECRET")
 
         if not app_id or not app_secret:
             return None, "Configuration error: BROKER_API_KEY / BROKER_API_SECRET not set."

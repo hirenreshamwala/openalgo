@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from utils.broker_context import get_broker_credential
 
 import httpx
 
@@ -30,7 +31,7 @@ def authenticate_broker(userid, authCode):
         # Fetching the necessary credentials from environment variables
         # BROKER_API_KEY   = appCode  (used for the login redirect, not needed here)
         # BROKER_API_SECRET = apiSecret (used to build the checksum)
-        BROKER_API_SECRET = os.environ.get("BROKER_API_SECRET")
+        BROKER_API_SECRET = get_broker_credential("BROKER_API_SECRET")
 
         if not BROKER_API_SECRET:
             logger.error("BROKER_API_SECRET not found in environment variables")

@@ -1,5 +1,6 @@
 import hashlib
 import os
+from utils.broker_context import get_broker_credential
 import time
 
 from utils.httpx_client import get_httpx_client
@@ -97,8 +98,8 @@ def authenticate_broker(code):
         tuple: (access_token, error_message)
     """
     try:
-        BROKER_API_KEY = os.getenv("BROKER_API_KEY")
-        BROKER_API_SECRET = os.getenv("BROKER_API_SECRET")
+        BROKER_API_KEY = get_broker_credential("BROKER_API_KEY")
+        BROKER_API_SECRET = get_broker_credential("BROKER_API_SECRET")
 
         if not BROKER_API_KEY or not BROKER_API_SECRET:
             return (

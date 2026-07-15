@@ -1,5 +1,6 @@
 import json
 import os
+from utils.broker_context import get_broker_credential
 
 import httpx
 
@@ -10,7 +11,7 @@ def authenticate_broker(clientcode, broker_pin, totp_code):
     """
     Authenticate with the broker and return the auth token.
     """
-    api_key = os.getenv("BROKER_API_KEY")
+    api_key = get_broker_credential("BROKER_API_KEY")
 
     try:
         # Get the shared httpx client
