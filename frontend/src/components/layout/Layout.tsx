@@ -1,4 +1,4 @@
-import { Link, Navigate, Outlet } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { SocketProvider } from '@/components/socket/SocketProvider'
 import { useAuthStore } from '@/stores/authStore'
 import { Footer } from './Footer'
@@ -7,6 +7,7 @@ import { Navbar } from './Navbar'
 
 export function Layout() {
   const { isSessionActive, user } = useAuthStore()
+  const location = useLocation()
 
   // Require a logged-in app session (password/TOTP done). A broker is NOT
   // required to enter the app shell — users can browse the dashboard and menus
@@ -15,7 +16,10 @@ export function Layout() {
     return <Navigate to="/login" replace />
   }
 
-  const noBroker = !user?.broker
+  // Show the connect-broker banner everywhere except the broker connect and
+  // credentials pages, where it would be redundant.
+  const onBrokerPages = ['/broker', '/broker-credentials'].includes(location.pathname)
+  const noBroker = !user?.broker && !onBrokerPages
 
   return (
     <SocketProvider>

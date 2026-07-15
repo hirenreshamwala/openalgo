@@ -147,171 +147,11 @@ def _mt_enabled() -> bool:
 @mt_settings_bp.route("/broker-credentials", methods=["GET"])
 @require_user_session
 def broker_credentials_page():
-    """Per-user broker credential management page (multi-tenant only)."""
+    """Legacy path — the credential manager is now the React page at
+    /broker-credentials (inside the app shell). Redirect there."""
     if not _mt_enabled():
         return "Not available", 404
-
-    username = session.get("user")
-    configured = set(list_user_brokers(username))
-
-    # CSRF token — the app runs Flask-WTF CSRFProtect globally, so every POST
-    # form must carry this hidden field or the submit is rejected with 400.
-    csrf_token = generate_csrf()
-
-    # Feedback banner from the post/redirect/get flow.
-    flash_html = ""
-    if request.args.get("saved"):
-        b = BROKER_DISPLAY.get(request.args["saved"], request.args["saved"])
-        flash_html = f"<div class='flash ok'>Saved credentials for {b}.</div>"
-    elif request.args.get("removed"):
-        b = BROKER_DISPLAY.get(request.args["removed"], request.args["removed"])
-        flash_html = f"<div class='flash ok'>Removed {b}.</div>"
-    elif request.args.get("error"):
-        flash_html = f"<div class='flash err'>{request.args['error']}</div>"
-
-    # One broker per user: if a broker is already configured, the add/update
-    # form is locked to that broker (only its keys/proxy can be updated). To
-    # switch brokers the user must remove the current one first. When nothing
-    # is configured yet, all 34 brokers are offered.
-    current_broker = next(iter(configured), None)
-    if current_broker:
-        options = f"<option value='{current_broker}'>{BROKER_DISPLAY.get(current_broker, current_broker)}</option>"
-        add_heading = "Update your broker"
-        switch_note = (
-            f"<p class='muted'>You have <strong>{BROKER_DISPLAY.get(current_broker, current_broker)}</strong> "
-            "configured. Update its API key / secret / proxy below. To use a different broker, remove it "
-            "first &mdash; only one broker per account.</p>"
-        )
-    else:
-        options = "".join(
-            f"<option value='{bid}'>{name}</option>" for bid, name in SUPPORTED_BROKERS
-        )
-        add_heading = "Add your broker"
-        switch_note = ""
-
-    # Table of already-configured brokers.
-    if configured:
-        saved_rows = ""
-        for bid in sorted(configured):
-            name = BROKER_DISPLAY.get(bid, bid)
-            creds = get_broker_credentials(username, bid) or {}
-            proxy = creds.get("proxy_url")
-            if proxy:
-                pp = _parse_proxy_url(proxy)
-                loc = f"{pp['host']}:{pp['port']}" if pp["port"] else pp["host"]
-                auth_note = " <span class='muted'>(auth)</span>" if pp["user"] else ""
-                proxy_cell = f"<code>{pp['scheme']}://{loc}</code>{auth_note}"
-            else:
-                proxy_cell = "<span class='muted'>direct</span>"
-            saved_rows += (
-                f"<tr><td>{name}</td><td><code>{bid}</code></td><td>{proxy_cell}</td>"
-                f"<td><form method='post' action='/mt/broker-credentials/{bid}/delete' style='display:inline' "
-                f"onsubmit='return confirm(\"Remove {name} credentials?\")'>"
-                f"<input type='hidden' name='csrf_token' value='{csrf_token}'>"
-                "<button class='btn-del' type='submit'>Remove</button></form></td></tr>"
-            )
-        saved_table = (
-            "<table><thead><tr><th>Broker</th><th>ID</th><th>Egress proxy</th><th>Action</th></tr></thead>"
-            f"<tbody>{saved_rows}</tbody></table>"
-        )
-    else:
-        saved_table = "<p class='muted'>No brokers configured yet. Add one below.</p>"
-
-    # Server's public egress IP — what the broker sees on a direct (no-proxy)
-    # connection. Users whitelisting the shared server IP add this.
-    server_ip = _get_server_public_ip()
-    if server_ip:
-        ip_banner = (
-            "<div class='ipbox'><div>"
-            "<span class='muted'>This server's public IP (for direct connections)</span><br>"
-            f"<span class='ip'>{server_ip}</span></div>"
-            f"<button type='button' class='btn-copy' onclick=\"navigator.clipboard.writeText('{server_ip}')\">Copy</button>"
-            "</div>"
-            "<p class='muted'>Add this IP to your broker's API/static-IP whitelist if you are "
-            "<strong>not</strong> using an egress proxy below. If you use a proxy, whitelist the "
-            "proxy's IP instead.</p>"
-        )
-    else:
-        ip_banner = (
-            "<div class='ipbox'><span class='muted'>Could not determine the server's public IP "
-            "(no outbound internet?). Check your server's static IP manually.</span></div>"
-        )
-
-    html = f"""<!doctype html><html><head><meta charset='utf-8'>
-<title>Broker Credentials — OpenAlgo</title>
-<meta name='viewport' content='width=device-width,initial-scale=1'>
-<style>*{{box-sizing:border-box}}body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:32px;max-width:760px}}
-h1{{color:#f8fafc;font-size:1.4rem;margin-bottom:4px}}h2{{color:#cbd5e1;font-size:1rem;margin-top:32px}}
-.muted{{color:#64748b;font-size:14px}}nav a{{color:#38bdf8;text-decoration:none;margin-right:16px;font-size:14px}}nav{{margin-bottom:20px}}
-table{{border-collapse:collapse;width:100%;background:#1e293b;border-radius:8px;overflow:hidden;margin-top:8px}}
-th{{background:#334155;padding:9px 14px;text-align:left;font-size:12px;color:#94a3b8;text-transform:uppercase}}
-td{{padding:9px 14px;font-size:14px;border-top:1px solid #0f172a}}code{{color:#7dd3fc}}
-form.add{{background:#1e293b;padding:20px;border-radius:8px;margin-top:8px}}
-label{{display:block;font-size:13px;color:#94a3b8;margin:12px 0 4px}}
-input,select{{width:100%;padding:9px 12px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px}}
-button{{border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;margin-top:16px}}
-.btn-save{{background:#2563eb;color:#fff}}.btn-del{{background:#7f1d1d;color:#fecaca;padding:5px 12px;margin:0;font-size:13px}}
-.ipbox{{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#0b2545;border:1px solid #1d4ed8;border-radius:8px;padding:14px 18px;margin-top:16px}}
-.ipbox .ip{{font-family:ui-monospace,monospace;font-size:1.3rem;font-weight:700;color:#7dd3fc;letter-spacing:.02em}}
-.btn-copy{{background:#1d4ed8;color:#fff;padding:6px 14px;margin:0;font-size:13px}}
-.flash{{padding:11px 16px;border-radius:8px;margin-top:16px;font-size:14px;font-weight:500}}
-.flash.ok{{background:#052e1b;border:1px solid #16a34a;color:#86efac}}
-.flash.err{{background:#3f1212;border:1px solid #dc2626;color:#fca5a5}}
-</style></head><body>
-<nav><a href='/broker'>&#8592; Broker Login</a><a href='/mt/broker-credentials'>&#8635; Refresh</a></nav>
-<h1>Broker Credentials</h1>
-<p class='muted'>Signed in as <strong>{username}</strong>. Add the API key &amp; secret for your broker. One broker per account, stored encrypted.</p>
-{flash_html}
-{ip_banner}
-<h2>Configured brokers</h2>
-{saved_table}
-
-<h2>{add_heading}</h2>
-{switch_note}
-<form class='add' method='post' action='/mt/broker-credentials'>
-  <input type='hidden' name='csrf_token' value='{csrf_token}'>
-  <label for='broker'>Broker</label>
-  <select id='broker' name='broker' required>{options}</select>
-  <label for='api_key'>API Key</label>
-  <input id='api_key' name='api_key' type='text' autocomplete='off' required placeholder='Your broker API key'>
-  <label for='api_secret'>API Secret</label>
-  <input id='api_secret' name='api_secret' type='password' autocomplete='off' required placeholder='Your broker API secret'>
-  <fieldset style='border:1px solid #334155;border-radius:8px;padding:12px 16px;margin-top:16px'>
-    <legend class='muted' style='padding:0 6px'>Egress Proxy (optional)</legend>
-    <p class='muted' style='margin-top:0'>If your broker whitelists a specific static IP, enter a proxy that egresses from that IP. Leave Host blank for a direct connection.</p>
-    <div style='display:flex;gap:12px;flex-wrap:wrap'>
-      <div style='flex:0 0 110px'>
-        <label for='proxy_scheme'>Scheme</label>
-        <select id='proxy_scheme' name='proxy_scheme'>
-          <option value='http'>http</option>
-          <option value='https'>https</option>
-        </select>
-      </div>
-      <div style='flex:1 1 240px'>
-        <label for='proxy_host'>Host / IP</label>
-        <input id='proxy_host' name='proxy_host' type='text' autocomplete='off' placeholder='e.g. 203.0.113.10 or proxy.example.com'>
-      </div>
-      <div style='flex:0 0 110px'>
-        <label for='proxy_port'>Port</label>
-        <input id='proxy_port' name='proxy_port' type='text' autocomplete='off' placeholder='8080'>
-      </div>
-    </div>
-    <div style='display:flex;gap:12px;flex-wrap:wrap'>
-      <div style='flex:1 1 240px'>
-        <label for='proxy_user'>Username <span class='muted'>(optional)</span></label>
-        <input id='proxy_user' name='proxy_user' type='text' autocomplete='off' placeholder='proxy username'>
-      </div>
-      <div style='flex:1 1 240px'>
-        <label for='proxy_pass'>Password <span class='muted'>(optional)</span></label>
-        <input id='proxy_pass' name='proxy_pass' type='password' autocomplete='off' placeholder='proxy password'>
-      </div>
-    </div>
-  </fieldset>
-  <button class='btn-save' type='submit'>Save credentials</button>
-</form>
-<p class='muted' style='margin-top:16px'>After saving, go to <a href='/broker' style='color:#38bdf8'>Broker Login</a> to connect.</p>
-</body></html>"""
-    return html
+    return redirect("/broker-credentials")
 
 
 @mt_settings_bp.route("/broker-credentials", methods=["POST"])
@@ -404,3 +244,81 @@ def broker_config_mt():
         )
 
     return jsonify(status="success", multi_tenant=True, brokers=brokers)
+
+
+# ============================================================================
+# JSON API for the React broker-credentials page (/broker-credentials)
+# ============================================================================
+
+
+@mt_settings_bp.route("/api/broker-credentials", methods=["GET"])
+@require_user_session
+def api_broker_credentials_get():
+    """Return the signed-in user's currently configured broker + proxy parts
+    (never the secrets) for the React manager page."""
+    if not _mt_enabled():
+        return jsonify(status="error", message="Not available"), 404
+    username = session.get("user")
+    brokers = list_user_brokers(username)
+    current = brokers[0] if brokers else None
+    proxy = _parse_proxy_url(None)
+    if current:
+        creds = get_broker_credentials(username, current) or {}
+        proxy = _parse_proxy_url(creds.get("proxy_url"))
+    # Do not leak the proxy password to the client; only say whether one is set.
+    has_pass = bool(proxy.pop("password", ""))
+    return jsonify(status="success", current_broker=current, proxy=proxy, proxy_has_password=has_pass)
+
+
+@mt_settings_bp.route("/api/broker-credentials", methods=["POST"])
+@require_user_session
+def api_broker_credentials_save():
+    """Save/update the user's single broker credential (JSON body)."""
+    if not _mt_enabled():
+        return jsonify(status="error", message="Not available"), 404
+    username = session.get("user")
+    data = request.get_json(silent=True) or {}
+    broker = (data.get("broker") or "").strip().lower()
+    api_key = (data.get("api_key") or "").strip()
+    api_secret = (data.get("api_secret") or "").strip()
+    proxy_host = (data.get("proxy_host") or "").strip()
+    proxy_port = (data.get("proxy_port") or "").strip()
+    proxy_url = _build_proxy_url(
+        data.get("proxy_scheme", "http"),
+        proxy_host,
+        proxy_port,
+        data.get("proxy_user", ""),
+        data.get("proxy_pass", ""),
+    )
+
+    if broker not in BROKER_DISPLAY:
+        return jsonify(status="error", message="Invalid broker"), 400
+    if not api_key or not api_secret:
+        return jsonify(status="error", message="API key and secret are required"), 400
+    if proxy_host and proxy_port and not proxy_port.isdigit():
+        return jsonify(status="error", message="Proxy port must be a number"), 400
+
+    # One broker per user: allow updating the existing one, reject a second.
+    existing = list_user_brokers(username)
+    if existing and broker not in existing:
+        return jsonify(
+            status="error",
+            message="Only one broker per account. Remove the current broker to switch.",
+        ), 400
+
+    if not save_broker_credentials(username, broker, api_key, api_secret, proxy_url=proxy_url):
+        return jsonify(status="error", message="Failed to save credentials"), 500
+    logger.info("User %s saved broker credentials for %s (react)", username, broker)
+    return jsonify(status="success", message=f"Saved credentials for {BROKER_DISPLAY[broker]}")
+
+
+@mt_settings_bp.route("/api/broker-credentials/<broker>", methods=["DELETE"])
+@require_user_session
+def api_broker_credentials_delete(broker):
+    """Remove the user's credentials for a broker (JSON)."""
+    if not _mt_enabled():
+        return jsonify(status="error", message="Not available"), 404
+    username = session.get("user")
+    delete_broker_credentials(username, broker.strip().lower())
+    logger.info("User %s removed broker credentials for %s (react)", username, broker)
+    return jsonify(status="success", message="Removed")

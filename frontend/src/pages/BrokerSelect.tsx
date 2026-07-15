@@ -1,6 +1,6 @@
 import { BookOpen, ExternalLink, Info, Loader2, LogOut } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { authApi } from '@/api/auth'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -264,14 +264,14 @@ export default function BrokerSelect() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-[60vh] flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-8 px-4">
+    <div className="min-h-[70vh] flex items-center justify-center py-4">
       <div className="container max-w-6xl">
         <div className="flex flex-col lg:flex-row items-center justify-between gap-8 lg:gap-16">
           {/* Right side broker form - Shown first on mobile */}
@@ -302,7 +302,7 @@ export default function BrokerSelect() {
                     </AlertDescription>
                   </Alert>
                   <Button asChild className="w-full">
-                    <a href="/mt/broker-credentials">Add Broker Credentials</a>
+                    <Link to="/broker-credentials">Add Broker Credentials</Link>
                   </Button>
                 </div>
               ) : (
@@ -368,9 +368,9 @@ export default function BrokerSelect() {
               )}
               {multiTenant && (
                 <p className="mt-4 text-center text-sm text-muted-foreground">
-                  <a href="/mt/broker-credentials" className="text-primary hover:underline">
+                  <Link to="/broker-credentials" className="text-primary hover:underline">
                     Manage broker credentials
-                  </a>
+                  </Link>
                 </p>
               )}
 

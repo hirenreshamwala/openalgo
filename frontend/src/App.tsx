@@ -24,6 +24,7 @@ const NotFound = lazy(() => import('@/pages/NotFound'))
 
 // Broker auth
 const BrokerSelect = lazy(() => import('@/pages/BrokerSelect'))
+const BrokerCredentials = lazy(() => import('@/pages/BrokerCredentials'))
 const BrokerTOTP = lazy(() => import('@/pages/BrokerTOTP'))
 const SamcoAuth = lazy(() => import('@/pages/SamcoAuth'))
 
@@ -174,7 +175,6 @@ function App() {
               <Route path="/rate-limited" element={<RateLimited />} />
 
               {/* Broker auth routes */}
-              <Route path="/broker" element={<BrokerSelect />} />
               <Route path="/broker/:broker/totp" element={<BrokerTOTP />} />
               <Route path="/broker/samco/auth" element={<SamcoAuth />} />
               {/* Dynamic broker TOTP routes for all supported brokers */}
@@ -194,6 +194,9 @@ function App() {
               {/* Protected routes - requires broker auth */}
               <Route element={<Layout />}>
                 <Route path="/dashboard" element={<Dashboard />} />
+                {/* Broker connect + credentials live inside the app shell */}
+                <Route path="/broker" element={<BrokerSelect />} />
+                <Route path="/broker-credentials" element={<BrokerCredentials />} />
                 <Route path="/positions" element={<Positions />} />
                 <Route path="/orderbook" element={<OrderBook />} />
                 <Route path="/tradebook" element={<TradeBook />} />
